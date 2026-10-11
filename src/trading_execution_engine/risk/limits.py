@@ -24,11 +24,13 @@ def evaluate_order(
     price: float,
     positions: Mapping[str, int],
     limits: RiskLimits,
+    available_cash: float | None = None,
 ) -> RiskDecision:
     if price <= 0:
         return RiskDecision(False, "invalid_price")
 
-    if order.quantity * price > limits.max_order_notional:
+    order_notional = order.quantity * price
+    if order_notional > limits.max_order_notional:
         return RiskDecision(False, "max_order_notional_exceeded")
 
     current_qty = positions.get(order.symbol, 0)
@@ -38,5 +40,12 @@ def evaluate_order(
         and order.quantity > current_qty
     ):
         return RiskDecision(False, "short_sale_not_allowed")
+
+    if (
+        order.side == OrderSide.BUY
+        and available_cash is not None
+        and order_notional > available_cash + 1e-9
+    ):
+        return RiskDecision(False, "insufficient_cash")
 
     return RiskDecision(True, "approved")

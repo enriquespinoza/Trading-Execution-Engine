@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from trading_execution_engine.brokers.base import Broker
+from trading_execution_engine.models.account import AccountState
 from trading_execution_engine.models.order import Fill, OrderRequest, OrderSide
 from trading_execution_engine.risk.limits import RiskDecision, RiskLimits, evaluate_order
 
@@ -13,6 +14,23 @@ class ExecutionResult:
     order: OrderRequest
     risk: RiskDecision
     fill: Fill | None
+    cash_after: float
+
+
+@dataclass(frozen=True)
+class ExecutionReport:
+    results: tuple[ExecutionResult, ...]
+    starting_cash: float
+    ending_cash: float
+    ending_positions: Mapping[str, int]
+
+    @property
+    def approved_count(self) -> int:
+        return sum(result.risk.approved for result in self.results)
+
+    @property
+    def rejected_count(self) -> int:
+        return len(self.results) - self.approved_count
 
 
 class ExecutionEngine:
@@ -25,29 +43,54 @@ class ExecutionEngine:
         orders: Sequence[OrderRequest],
         *,
         prices: Mapping[str, float],
-        positions: Mapping[str, int],
-    ) -> list[ExecutionResult]:
-        working_positions = dict(positions)
+        account: AccountState,
+    ) -> ExecutionReport:
+        """Execute a rebalance deterministically: sells first, then buys."""
+
+        starting_cash = account.cash
         results: list[ExecutionResult] = []
 
-        for order in orders:
+        ordered = [o for o in orders if o.side == OrderSide.SELL]
+        ordered.extend(o for o in orders if o.side == OrderSide.BUY)
+
+        for order in ordered:
             if order.symbol not in prices:
                 raise ValueError(f"missing execution price for {order.symbol}")
 
+            price = prices[order.symbol]
             risk = evaluate_order(
                 order,
-                price=prices[order.symbol],
-                positions=working_positions,
+                price=price,
+                positions=account.positions,
                 limits=self._risk_limits,
+                available_cash=account.cash,
             )
 
             if not risk.approved:
-                results.append(ExecutionResult(order=order, risk=risk, fill=None))
+                results.append(
+                    ExecutionResult(
+                        order=order,
+                        risk=risk,
+                        fill=None,
+                        cash_after=account.cash,
+                    )
+                )
                 continue
 
             fill = self._broker.submit_order(order)
-            signed_qty = fill.quantity if fill.side == OrderSide.BUY else -fill.quantity
-            working_positions[fill.symbol] = working_positions.get(fill.symbol, 0) + signed_qty
-            results.append(ExecutionResult(order=order, risk=risk, fill=fill))
+            account.apply_fill(fill)
+            results.append(
+                ExecutionResult(
+                    order=order,
+                    risk=risk,
+                    fill=fill,
+                    cash_after=account.cash,
+                )
+            )
 
-        return results
+        return ExecutionReport(
+            results=tuple(results),
+            starting_cash=starting_cash,
+            ending_cash=account.cash,
+            ending_positions=dict(account.positions),
+        )

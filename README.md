@@ -9,42 +9,53 @@ This repository answers **how and whether to execute**. It does not decide which
 Upstream systems:
 - Stock Scanner Engine → candidate securities / ranked signals
 - Portfolio Optimization Engine → target allocations
-- Strategy research models (for example TMF research) → optional execution signals
+- Strategy research models → optional execution signals
 
 This repository:
 - reconciles target allocations against current positions;
 - constructs proposed orders;
 - applies pre-trade risk controls;
+- maintains simulated cash and position state;
+- sequences sells before buys during rebalances;
 - routes approved orders to a broker adapter;
 - records deterministic simulation results;
+- reports post-trade target-weight drift;
 - later supports paper-trading adapters before any live execution work.
 
-## Phase 1 architecture
+## Phase 2 architecture
 
 ```text
-Target Allocations + Current Positions + Prices
-                    |
-                    v
-          Rebalance / Reconciliation
-                    |
-                    v
-             Proposed Orders
-                    |
-                    v
-               Risk Gates
-              /          \
-         reject         approve
-                           |
-                           v
-                    Broker Interface
-                           |
-                           v
-                    SimulationBroker
+Target Allocations + Current Account State + Prices
+                        |
+                        v
+              Rebalance Reconciliation
+                        |
+                        v
+                 Proposed Orders
+                        |
+                sells before buys
+                        |
+                        v
+                    Risk Gates
+           /               |               \
+      reject       insufficient cash      approve
+                                             |
+                                             v
+                                      Broker Interface
+                                             |
+                                             v
+                                      SimulationBroker
+                                             |
+                                             v
+                                  Cash + Positions Updated
+                                             |
+                                             v
+                                  Post-Trade Reconciliation
 ```
 
 ## Safety boundary
 
-Phase 1 contains no live-broker credentials and no live-order adapter. `SimulationBroker` is the only implemented broker.
+No live-broker credentials and no live-order adapter are present. `SimulationBroker` remains the only implemented broker. Rejected orders never reach the broker adapter.
 
 ## Setup
 
@@ -52,7 +63,7 @@ Phase 1 contains no live-broker credentials and no live-order adapter. `Simulati
 python -m venv .venv
 source .venv/Scripts/activate   # Git Bash on Windows
 python -m pip install --upgrade pip
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 pytest
 ```
 
@@ -62,31 +73,34 @@ Run the deterministic dry simulation:
 python scripts/run_dry_simulation.py
 ```
 
-## Phase 1 completion criteria
+## Phase 2A implemented
 
-- Rebalance calculations are deterministic and unit-tested.
-- Risk gates can block invalid or oversized orders.
-- Simulation broker is the only order destination.
-- Rejected orders never reach the broker.
-- The engine can accept target weights from the Portfolio Optimization Engine without importing that project.
-- Tests pass locally before the next phase begins.
+- sell-before-buy rebalance sequencing;
+- execution-time cash ledger;
+- cash updates after every fill;
+- position updates after every fill;
+- insufficient-cash rejection;
+- complete liquidation of positions omitted from target allocations;
+- post-trade reconciliation of target vs. actual weights;
+- whole-share execution policy retained from Phase 1;
+- deterministic simulation only.
 
-## Planned phases
+## Phase 2 remaining
 
-**Phase 2 — execution semantics**
-- cash-aware sequencing
-- sell-before-buy rebalance ordering
-- fractional-share policy
-- limit-order representation
-- configurable slippage and transaction costs
-- idempotency / duplicate-order prevention
-- trading-session rules
+- explicit fractional-share policy configuration;
+- market and limit order representations;
+- configurable slippage;
+- transaction-cost simulation;
+- idempotency / duplicate-order prevention;
+- trading-session controls;
+- global kill switch.
+
+## Later phases
 
 **Phase 3 — state and auditability**
 - execution journal
 - portfolio state snapshots
-- order lifecycle states
-- reconciliation after fills
+- richer order lifecycle states
 - restart / recovery behavior
 
 **Phase 4 — paper-trading adapter**
