@@ -22,9 +22,10 @@ def evaluate_order(
     order: OrderRequest,
     *,
     price: float,
-    positions: Mapping[str, int],
+    positions: Mapping[str, float],
     limits: RiskLimits,
     available_cash: float | None = None,
+    estimated_fees: float = 0.0,
 ) -> RiskDecision:
     if price <= 0:
         return RiskDecision(False, "invalid_price")
@@ -33,18 +34,18 @@ def evaluate_order(
     if order_notional > limits.max_order_notional:
         return RiskDecision(False, "max_order_notional_exceeded")
 
-    current_qty = positions.get(order.symbol, 0)
+    current_qty = positions.get(order.symbol, 0.0)
     if (
         order.side == OrderSide.SELL
         and not limits.allow_short_sales
-        and order.quantity > current_qty
+        and order.quantity > current_qty + 1e-9
     ):
         return RiskDecision(False, "short_sale_not_allowed")
 
     if (
         order.side == OrderSide.BUY
         and available_cash is not None
-        and order_notional > available_cash + 1e-9
+        and order_notional + estimated_fees > available_cash + 1e-9
     ):
         return RiskDecision(False, "insufficient_cash")
 

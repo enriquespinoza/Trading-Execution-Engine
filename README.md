@@ -85,15 +85,22 @@ python scripts/run_dry_simulation.py
 - whole-share execution policy retained from Phase 1;
 - deterministic simulation only.
 
-## Phase 2 remaining
+## Phase 2B implemented
 
 - explicit fractional-share policy configuration;
 - market and limit order representations;
-- configurable slippage;
-- transaction-cost simulation;
-- idempotency / duplicate-order prevention;
-- trading-session controls;
-- global kill switch.
+- configurable slippage in basis points;
+- per-order and per-share transaction-cost simulation;
+- duplicate-order ID protection;
+- market-session execution gate;
+- global kill switch;
+- broker order preview before risk approval.
+
+## Phase 2 remaining
+
+- persistent execution journal;
+- durable idempotency across process restarts;
+- portfolio snapshots and restart/recovery semantics.
 
 ## Later phases
 
