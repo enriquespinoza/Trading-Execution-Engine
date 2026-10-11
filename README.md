@@ -298,3 +298,112 @@ REJECT 123456
 
 Only `TRADE_ALERT_TO_NUMBER` is authorized to resolve approvals. Approval
 codes expire after `TRADE_APPROVAL_TTL_MINUTES`, default 10 minutes.
+
+
+## End-to-end Twilio approval simulation
+
+This test exercises the real SMS path while keeping order execution entirely
+inside `SimulationBroker`.
+
+### 1. Configure Twilio
+
+Use an SMS-capable Twilio phone number. In the Twilio Console for that number,
+set **Messaging → A message comes in** to **Webhook**, use **HTTP POST**, and
+point it to:
+
+```text
+https://YOUR-PUBLIC-HOST/sms/approval
+```
+
+The webhook must be publicly reachable. For development, a temporary HTTPS
+tunnel to local port 5000 is sufficient.
+
+Set the exact same public URL in:
+
+```text
+TWILIO_APPROVAL_WEBHOOK_URL=https://YOUR-PUBLIC-HOST/sms/approval
+```
+
+The exact URL matters because Twilio request signatures include the webhook
+URL.
+
+### 2. Start the local webhook
+
+```bash
+python scripts/run_approval_webhook.py
+```
+
+Leave that terminal running.
+
+### 3. Reset prior E2E state
+
+In a second terminal:
+
+```bash
+python scripts/run_e2e_sms_approval_simulation.py reset
+```
+
+### 4. Generate the simulated trade
+
+```bash
+python scripts/run_e2e_sms_approval_simulation.py request
+```
+
+Expected state:
+
+```text
+Status:     PENDING_APPROVAL
+Broker fill: NO
+```
+
+Your real phone should receive an SMS similar to:
+
+```text
+TRADE APPROVAL REQUIRED
+BUY 2 TEST
+MARKET est price $100.00
+Notional $200.00 | fees $0.00
+Reply APPROVE 123456 or REJECT 123456
+Expires in 10 min.
+```
+
+### 5. Approve from the authorized phone
+
+Reply to the Twilio number using the exact command from the SMS:
+
+```text
+APPROVE 123456
+```
+
+The inbound webhook only records the approval. It does not submit a trade.
+
+Check the durable state:
+
+```bash
+python scripts/run_e2e_sms_approval_simulation.py status
+```
+
+Expected:
+
+```text
+Approval: APPROVED
+```
+
+### 6. Re-run execution
+
+```bash
+python scripts/run_e2e_sms_approval_simulation.py execute
+```
+
+The engine performs a fresh preview and risk check before the simulated fill.
+Expected ending state:
+
+```text
+Status:      FILLED
+Ending cash: $800.00
+Positions:   {'TEST': 2.0}
+
+PASS: human approval was recorded and SimulationBroker filled the order.
+```
+
+No brokerage API is called anywhere in this E2E test.
