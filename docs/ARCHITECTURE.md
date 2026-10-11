@@ -103,3 +103,40 @@ Each approved simulated fill is applied immediately. SELL fills increase cash be
 - A SELL must not create a short position while short sales are disabled.
 - Execution order is deterministic: sells precede buys.
 - `SimulationBroker` is the only broker implementation until paper-trading work begins.
+
+
+## Pre-trade notification boundary
+
+Phone notification is positioned after broker preview and risk approval, but
+before broker submission. This avoids sending alerts for orders that have
+already failed basic controls while preserving the invariant that a required
+notification must succeed before an order can reach the broker.
+
+```text
+control gates
+    |
+broker preview
+    |
+risk checks
+    |
+required pre-trade notifier
+    |---------------- failure/missing --> rejected
+    |
+successful delivery
+    |
+broker.submit_order()
+```
+
+Provider-specific code is isolated behind the `TradeNotifier` contract.
+Twilio is the first adapter. The execution engine itself does not import or
+depend on Twilio.
+
+### Notification invariants
+
+- When `require_pretrade_notification=True`, absence of a notifier rejects
+  the order.
+- A provider send failure rejects the order.
+- Broker submission occurs only after a successful notification result.
+- Secrets and destination phone numbers are environment configuration, not
+  repository data.
+- Notification success does not yet constitute human approval.

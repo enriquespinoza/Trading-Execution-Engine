@@ -11,6 +11,11 @@ from trading_execution_engine.models.order import (
     OrderSide,
     OrderStatus,
 )
+from trading_execution_engine.notifications.base import (
+    NotificationResult,
+    PreTradeAlert,
+    TradeNotifier,
+)
 from trading_execution_engine.risk.limits import (
     RiskDecision,
     RiskLimits,
@@ -23,6 +28,7 @@ class ExecutionControls:
     market_session_open: bool = True
     kill_switch_engaged: bool = False
     allow_fractional_shares: bool = False
+    require_pretrade_notification: bool = False
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,7 @@ class ExecutionResult:
     cash_after: float
     status: OrderStatus
     execution_reason: str
+    notification: NotificationResult | None = None
 
 
 @dataclass(frozen=True)
@@ -63,10 +70,12 @@ class ExecutionEngine:
         broker: Broker,
         risk_limits: RiskLimits,
         controls: ExecutionControls | None = None,
+        notifier: TradeNotifier | None = None,
     ) -> None:
         self._broker = broker
         self._risk_limits = risk_limits
         self._controls = controls or ExecutionControls()
+        self._notifier = notifier
         self._processed_order_ids: set[str] = set()
 
     def _control_decision(self, order: OrderRequest) -> RiskDecision:
@@ -148,9 +157,8 @@ class ExecutionEngine:
                 )
                 continue
 
-            self._processed_order_ids.add(order.order_id)
-
             if not preview.fillable:
+                self._processed_order_ids.add(order.order_id)
                 results.append(
                     ExecutionResult(
                         order=order,
@@ -163,6 +171,53 @@ class ExecutionEngine:
                 )
                 continue
 
+            notification: NotificationResult | None = None
+            if self._controls.require_pretrade_notification:
+                if self._notifier is None:
+                    results.append(
+                        ExecutionResult(
+                            order=order,
+                            risk=RiskDecision(
+                                False,
+                                "pretrade_notifier_not_configured",
+                            ),
+                            fill=None,
+                            cash_after=account.cash,
+                            status=OrderStatus.REJECTED,
+                            execution_reason=(
+                                "pretrade_notifier_not_configured"
+                            ),
+                        )
+                    )
+                    continue
+
+                alert = PreTradeAlert(
+                    order=order,
+                    estimated_fill_price=preview.estimated_fill_price,
+                    estimated_fees=preview.estimated_fees,
+                    available_cash=account.cash,
+                )
+                notification = self._notifier.send(alert)
+                if not notification.sent:
+                    results.append(
+                        ExecutionResult(
+                            order=order,
+                            risk=RiskDecision(
+                                False,
+                                "pretrade_notification_failed",
+                            ),
+                            fill=None,
+                            cash_after=account.cash,
+                            status=OrderStatus.REJECTED,
+                            execution_reason=(
+                                "pretrade_notification_failed"
+                            ),
+                            notification=notification,
+                        )
+                    )
+                    continue
+
+            self._processed_order_ids.add(order.order_id)
             fill = self._broker.submit_order(order)
             if fill is None:
                 results.append(
@@ -173,6 +228,7 @@ class ExecutionEngine:
                         cash_after=account.cash,
                         status=OrderStatus.NOT_FILLED,
                         execution_reason="broker_not_filled",
+                        notification=notification,
                     )
                 )
                 continue
@@ -186,6 +242,7 @@ class ExecutionEngine:
                     cash_after=account.cash,
                     status=OrderStatus.FILLED,
                     execution_reason="filled",
+                    notification=notification,
                 )
             )
 
