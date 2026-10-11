@@ -407,3 +407,94 @@ PASS: human approval was recorded and SimulationBroker filled the order.
 ```
 
 No brokerage API is called anywhere in this E2E test.
+
+
+## Phase 2E — push approval on phone
+
+The primary human-approval path now uses **ntfy push notifications** instead
+of SMS. Twilio remains optional fallback code.
+
+The push workflow is:
+
+```text
+Proposed trade
+    |
+    v
+fresh preview + risk
+    |
+    v
+ntfy push to phone
+    |
+    +-- Approve button
+    |      |
+    |      v
+    |  response topic
+    |
+    +-- Reject button
+           |
+           v
+       response topic
+              |
+              v
+      local approval poller
+              |
+              v
+       durable approval state
+              |
+              v
+       next execution pass
+              |
+              v
+      fresh preview + risk
+              |
+              v
+        SimulationBroker
+```
+
+No inbound webhook or public tunnel is required for this path.
+
+### Phone setup
+
+Install the ntfy app on the phone and subscribe to the alert topic configured
+in `NTFY_ALERT_TOPIC`.
+
+For initial testing, configure two long random topic names:
+
+```text
+NTFY_BASE_URL=https://ntfy.sh
+NTFY_ALERT_TOPIC=<long-random-alert-topic>
+NTFY_RESPONSE_TOPIC=<different-long-random-response-topic>
+NTFY_ACCESS_TOKEN=
+```
+
+Do not use human-readable public topic names for real trading alerts. For
+production use, prefer authenticated private topics or a self-hosted ntfy
+instance.
+
+### Push smoke test
+
+```bash
+python scripts/send_test_push.py
+```
+
+Your phone should receive:
+
+```text
+Trading Execution Engine push test.
+```
+
+### Approval response polling
+
+Approval action buttons publish `APPROVE <token>` or `REJECT <token>` to
+the private response topic. Pull those responses into the durable approval
+store with:
+
+```bash
+python scripts/poll_push_approvals.py
+```
+
+The response poller does not place a trade. It only updates approval state.
+The next execution pass still performs fresh preview and risk checks.
+
+The SMS/Twilio path can remain installed as an optional adapter, but it is no
+longer the recommended development path.

@@ -47,3 +47,15 @@ class TradeNotifier(ABC):
 
     def send(self, alert: PreTradeAlert) -> NotificationResult:
         return self.send_message(alert.to_message())
+
+    def send_approval_request(
+        self,
+        message: str,
+        *,
+        approval_code: str,
+    ) -> NotificationResult:
+        """Provider hook for interactive approval notifications.
+
+        Providers without action-button support can fall back to plain text.
+        """
+        return self.send_message(message)

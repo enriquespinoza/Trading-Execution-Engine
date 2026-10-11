@@ -37,23 +37,25 @@ class ApprovalService:
         *,
         store: JsonApprovalStore,
         notifier: TradeNotifier,
-        authorized_phone_number: str,
+        authorized_phone_number: str | None = None,
         ttl_minutes: int = 10,
         now: Callable[[], datetime] | None = None,
         code_factory: Callable[[], str] | None = None,
     ) -> None:
         if ttl_minutes <= 0:
             raise ValueError("ttl_minutes must be positive")
-        if not authorized_phone_number.strip():
-            raise ValueError("authorized_phone_number is required")
 
         self._store = store
         self._notifier = notifier
-        self._authorized_phone_number = authorized_phone_number.strip()
+        self._authorized_phone_number = (
+            authorized_phone_number.strip()
+            if authorized_phone_number
+            else None
+        )
         self._ttl = timedelta(minutes=ttl_minutes)
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._code_factory = code_factory or (
-            lambda: f"{secrets.randbelow(1_000_000):06d}"
+            lambda: secrets.token_urlsafe(24)
         )
 
     def _parse(self, value: str) -> datetime:
@@ -119,10 +121,12 @@ class ApprovalService:
             f"{order.side.value} {order.quantity:g} {order.symbol}\n"
             f"{order.order_type.value} est price ${estimated_fill_price:,.2f}\n"
             f"Notional ${notional:,.2f} | fees ${estimated_fees:,.2f}\n"
-            f"Reply APPROVE {code} or REJECT {code}\n"
             f"Expires in {int(self._ttl.total_seconds() // 60)} min."
         )
-        notification = self._notifier.send_message(message)
+        notification = self._notifier.send_approval_request(
+            message,
+            approval_code=code,
+        )
         if not notification.sent:
             return ApprovalDecision(
                 ApprovalStatus.REJECTED,
@@ -137,26 +141,16 @@ class ApprovalService:
             notification,
         )
 
-    def handle_reply(
-        self,
-        *,
-        from_number: str,
-        body: str,
-    ) -> ApprovalDecision:
-        if from_number.strip() != self._authorized_phone_number:
-            return ApprovalDecision(
-                ApprovalStatus.REJECTED,
-                "unauthorized_sender",
-            )
-
-        parts = body.strip().upper().split()
-        if len(parts) != 2 or parts[0] not in {"APPROVE", "REJECT"}:
+    def handle_command(self, body: str) -> ApprovalDecision:
+        parts = body.strip().split(maxsplit=1)
+        if len(parts) != 2 or parts[0].upper() not in {"APPROVE", "REJECT"}:
             return ApprovalDecision(
                 ApprovalStatus.REJECTED,
                 "invalid_approval_command",
             )
 
-        action, code = parts
+        action = parts[0].upper()
+        code = parts[1]
         matches = self._store.find_by_code(code)
         if len(matches) != 1:
             return ApprovalDecision(
@@ -167,7 +161,10 @@ class ApprovalService:
         record = matches[0]
         status = self._record_status(record)
         if status != ApprovalStatus.PENDING:
-            return ApprovalDecision(status, f"approval_{status.value.lower()}")
+            return ApprovalDecision(
+                status,
+                f"approval_{status.value.lower()}",
+            )
 
         resolved_status = (
             ApprovalStatus.APPROVED
@@ -188,3 +185,21 @@ class ApprovalService:
                 else "human_rejected"
             ),
         )
+
+    def handle_reply(
+        self,
+        *,
+        from_number: str,
+        body: str,
+    ) -> ApprovalDecision:
+        if self._authorized_phone_number is None:
+            return ApprovalDecision(
+                ApprovalStatus.REJECTED,
+                "phone_sender_validation_not_configured",
+            )
+        if from_number.strip() != self._authorized_phone_number:
+            return ApprovalDecision(
+                ApprovalStatus.REJECTED,
+                "unauthorized_sender",
+            )
+        return self.handle_command(body)
