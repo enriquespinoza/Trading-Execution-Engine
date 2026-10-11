@@ -6,11 +6,12 @@ from typing import Any
 from trading_execution_engine.notifications.base import (
     NotificationResult,
     PreTradeAlert,
+    TradeNotifier,
 )
 
 
-class TwilioSmsNotifier:
-    """Send pre-trade alerts through Twilio without storing secrets in code."""
+class TwilioSmsNotifier(TradeNotifier):
+    """Send trade messages through Twilio without storing secrets in code."""
 
     def __init__(
         self,
@@ -30,12 +31,15 @@ class TwilioSmsNotifier:
     @classmethod
     def from_env(cls) -> "TwilioSmsNotifier":
         try:
+            from dotenv import load_dotenv
             from twilio.rest import Client
         except ImportError as exc:
             raise RuntimeError(
-                'Twilio support is not installed. Run: '
+                'SMS support is not installed. Run: '
                 'python -m pip install -e ".[sms]"'
             ) from exc
+
+        load_dotenv()
 
         account_sid = os.environ["TWILIO_ACCOUNT_SID"]
         from_number = os.environ["TWILIO_FROM_NUMBER"]
@@ -61,15 +65,14 @@ class TwilioSmsNotifier:
             client=client,
         )
 
-    def send(self, alert: PreTradeAlert) -> NotificationResult:
+    def send_message(self, message: str) -> NotificationResult:
         try:
-            message = self._client.messages.create(
-                body=alert.to_message(),
+            result = self._client.messages.create(
+                body=message,
                 from_=self._from_number,
                 to=self._to_number,
             )
         except Exception:
-            # Fail closed without leaking provider details or credentials.
             return NotificationResult(
                 sent=False,
                 reason="twilio_send_failed",
@@ -78,5 +81,8 @@ class TwilioSmsNotifier:
         return NotificationResult(
             sent=True,
             reason="sent",
-            provider_message_id=getattr(message, "sid", None),
+            provider_message_id=getattr(result, "sid", None),
         )
+
+    def send(self, alert: PreTradeAlert) -> NotificationResult:
+        return self.send_message(alert.to_message())

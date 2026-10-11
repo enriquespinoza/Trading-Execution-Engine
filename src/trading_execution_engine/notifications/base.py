@@ -42,5 +42,8 @@ class NotificationResult:
 
 class TradeNotifier(ABC):
     @abstractmethod
-    def send(self, alert: PreTradeAlert) -> NotificationResult:
+    def send_message(self, message: str) -> NotificationResult:
         raise NotImplementedError
+
+    def send(self, alert: PreTradeAlert) -> NotificationResult:
+        return self.send_message(alert.to_message())

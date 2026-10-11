@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
+from trading_execution_engine.approvals.service import (
+    ApprovalDecision,
+    ApprovalService,
+    ApprovalStatus,
+)
 from trading_execution_engine.brokers.base import Broker
 from trading_execution_engine.models.account import AccountState
 from trading_execution_engine.models.order import (
@@ -29,6 +34,7 @@ class ExecutionControls:
     kill_switch_engaged: bool = False
     allow_fractional_shares: bool = False
     require_pretrade_notification: bool = False
+    require_pretrade_approval: bool = False
 
 
 @dataclass(frozen=True)
@@ -40,6 +46,7 @@ class ExecutionResult:
     status: OrderStatus
     execution_reason: str
     notification: NotificationResult | None = None
+    approval: ApprovalDecision | None = None
 
 
 @dataclass(frozen=True)
@@ -63,6 +70,13 @@ class ExecutionReport:
             for result in self.results
         )
 
+    @property
+    def pending_approval_count(self) -> int:
+        return sum(
+            result.status == OrderStatus.PENDING_APPROVAL
+            for result in self.results
+        )
+
 
 class ExecutionEngine:
     def __init__(
@@ -71,11 +85,13 @@ class ExecutionEngine:
         risk_limits: RiskLimits,
         controls: ExecutionControls | None = None,
         notifier: TradeNotifier | None = None,
+        approval_service: ApprovalService | None = None,
     ) -> None:
         self._broker = broker
         self._risk_limits = risk_limits
         self._controls = controls or ExecutionControls()
         self._notifier = notifier
+        self._approval_service = approval_service
         self._processed_order_ids: set[str] = set()
 
     def _control_decision(self, order: OrderRequest) -> RiskDecision:
@@ -134,6 +150,8 @@ class ExecutionEngine:
                 )
                 continue
 
+            # Preview and risk are deliberately rerun every execution attempt,
+            # including after a human approval has already been recorded.
             preview = self._broker.preview_order(order)
             risk = evaluate_order(
                 order,
@@ -172,7 +190,68 @@ class ExecutionEngine:
                 continue
 
             notification: NotificationResult | None = None
-            if self._controls.require_pretrade_notification:
+            approval: ApprovalDecision | None = None
+
+            if self._controls.require_pretrade_approval:
+                if self._approval_service is None:
+                    results.append(
+                        ExecutionResult(
+                            order=order,
+                            risk=RiskDecision(
+                                False,
+                                "approval_service_not_configured",
+                            ),
+                            fill=None,
+                            cash_after=account.cash,
+                            status=OrderStatus.REJECTED,
+                            execution_reason=(
+                                "approval_service_not_configured"
+                            ),
+                        )
+                    )
+                    continue
+
+                approval = self._approval_service.check_or_request(
+                    order=order,
+                    estimated_fill_price=preview.estimated_fill_price,
+                    estimated_fees=preview.estimated_fees,
+                )
+                notification = approval.notification
+
+                if approval.status == ApprovalStatus.PENDING:
+                    results.append(
+                        ExecutionResult(
+                            order=order,
+                            risk=risk,
+                            fill=None,
+                            cash_after=account.cash,
+                            status=OrderStatus.PENDING_APPROVAL,
+                            execution_reason=approval.reason,
+                            notification=notification,
+                            approval=approval,
+                        )
+                    )
+                    continue
+
+                if approval.status != ApprovalStatus.APPROVED:
+                    results.append(
+                        ExecutionResult(
+                            order=order,
+                            risk=RiskDecision(
+                                False,
+                                approval.reason,
+                            ),
+                            fill=None,
+                            cash_after=account.cash,
+                            status=OrderStatus.REJECTED,
+                            execution_reason=approval.reason,
+                            notification=notification,
+                            approval=approval,
+                        )
+                    )
+                    continue
+
+            elif self._controls.require_pretrade_notification:
                 if self._notifier is None:
                     results.append(
                         ExecutionResult(
@@ -229,6 +308,7 @@ class ExecutionEngine:
                         status=OrderStatus.NOT_FILLED,
                         execution_reason="broker_not_filled",
                         notification=notification,
+                        approval=approval,
                     )
                 )
                 continue
@@ -243,6 +323,7 @@ class ExecutionEngine:
                     status=OrderStatus.FILLED,
                     execution_reason="filled",
                     notification=notification,
+                    approval=approval,
                 )
             )
 

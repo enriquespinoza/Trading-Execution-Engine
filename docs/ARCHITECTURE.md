@@ -140,3 +140,48 @@ depend on Twilio.
 - Secrets and destination phone numbers are environment configuration, not
   repository data.
 - Notification success does not yet constitute human approval.
+
+
+## Human approval state machine
+
+```text
+             +------------------+
+             |    PROPOSED      |
+             +---------+--------+
+                       |
+             preview + risk pass
+                       |
+                       v
+             +------------------+
+             | PENDING_APPROVAL |
+             +---+----------+---+
+                 |          |
+            REJECT/TTL    APPROVE
+                 |          |
+                 v          v
+             REJECTED   REVALIDATE
+                            |
+                 +----------+----------+
+                 |                     |
+              risk fail             risk pass
+                 |                     |
+                 v                     v
+              REJECTED              SUBMIT
+                                       |
+                                       v
+                                     FILLED
+```
+
+Approval is intentionally not the final execution authority. It authorizes
+the engine to attempt execution, after which broker preview and risk checks
+are evaluated again using current account state and prices.
+
+Inbound Twilio approval requests must pass all of the following:
+
+1. valid `X-Twilio-Signature`;
+2. exact configured webhook URL validation;
+3. sender phone number equals the configured authorized number;
+4. command is exactly `APPROVE <code>` or `REJECT <code>`;
+5. approval code exists, is unique, and is unexpired.
+
+The webhook only mutates approval state. It never submits a broker order.

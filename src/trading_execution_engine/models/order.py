@@ -17,6 +17,7 @@ class OrderType(str, Enum):
 
 class OrderStatus(str, Enum):
     CREATED = "CREATED"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
     REJECTED = "REJECTED"
     NOT_FILLED = "NOT_FILLED"
     FILLED = "FILLED"
