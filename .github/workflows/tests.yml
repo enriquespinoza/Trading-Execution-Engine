@@ -23,7 +23,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install project
-        run: python -m pip install -e ".[dev,sms]"
+        run: python -m pip install -e ".[dev,push,sms]"
 
       - name: Run tests
         run: pytest

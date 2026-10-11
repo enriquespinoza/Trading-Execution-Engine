@@ -52,10 +52,14 @@ class TradeNotifier(ABC):
         self,
         message: str,
         *,
-        approval_code: str,
+        approve_command: str,
+        reject_command: str,
     ) -> NotificationResult:
-        """Provider hook for interactive approval notifications.
-
-        Providers without action-button support can fall back to plain text.
-        """
-        return self.send_message(message)
+        """Provider hook for interactive human approval."""
+        return self.send_message(
+            message
+            + "\n"
+            + approve_command
+            + "\n"
+            + reject_command
+        )

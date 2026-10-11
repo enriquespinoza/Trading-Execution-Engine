@@ -25,6 +25,22 @@ class RecordingNotifier:
         self.messages.append(message)
         return NotificationResult(True, "sent", "SM-test")
 
+    def send_approval_request(
+        self,
+        message,
+        *,
+        approve_command,
+        reject_command,
+    ):
+        self.messages.append(
+            message
+            + "\n"
+            + approve_command
+            + "\n"
+            + reject_command
+        )
+        return NotificationResult(True, "sent", "SM-test")
+
 
 def build_service(tmp_path, *, now=None):
     notifier = RecordingNotifier()

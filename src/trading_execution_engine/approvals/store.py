@@ -13,6 +13,8 @@ class ApprovalRecord:
     created_at: str
     expires_at: str
     resolved_at: str | None = None
+    order_fingerprint: str = ""
+    consumed_at: str | None = None
 
 
 class JsonApprovalStore:

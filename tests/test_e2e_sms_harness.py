@@ -1,6 +1,17 @@
+import importlib.util
 import json
+from pathlib import Path
 
-import scripts.run_e2e_sms_approval_simulation as e2e
+
+SCRIPT_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "run_e2e_sms_approval_simulation.py"
+)
+SPEC = importlib.util.spec_from_file_location("e2e_sms_harness", SCRIPT_PATH)
+assert SPEC is not None and SPEC.loader is not None
+e2e = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(e2e)
 
 
 def test_create_and_load_scenario(tmp_path, monkeypatch):

@@ -251,6 +251,31 @@ class ExecutionEngine:
                     )
                     continue
 
+                # Consume the durable approval before broker submission.
+                # A consumed approval cannot be replayed after a restart.
+                approval = self._approval_service.consume_approval(
+                    order=order,
+                    estimated_fill_price=preview.estimated_fill_price,
+                    estimated_fees=preview.estimated_fees,
+                )
+                if approval.status != ApprovalStatus.CONSUMED:
+                    results.append(
+                        ExecutionResult(
+                            order=order,
+                            risk=RiskDecision(
+                                False,
+                                approval.reason,
+                            ),
+                            fill=None,
+                            cash_after=account.cash,
+                            status=OrderStatus.REJECTED,
+                            execution_reason=approval.reason,
+                            notification=notification,
+                            approval=approval,
+                        )
+                    )
+                    continue
+
             elif self._controls.require_pretrade_notification:
                 if self._notifier is None:
                     results.append(

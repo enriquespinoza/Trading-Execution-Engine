@@ -498,3 +498,124 @@ The next execution pass still performs fresh preview and risk checks.
 
 The SMS/Twilio path can remain installed as an optional adapter, but it is no
 longer the recommended development path.
+
+
+## Phase 2F — hardened signed push approvals
+
+The ntfy approval transport is treated as **untrusted transport**. An approval
+message is not trusted merely because it came from the response topic.
+
+Each approval challenge now includes:
+
+- a cryptographically random nonce;
+- the exact order ID;
+- symbol;
+- BUY/SELL side;
+- quantity;
+- order type;
+- limit price when present;
+- estimated execution price;
+- estimated fees;
+- expiration time;
+- SHA-256 trade fingerprint;
+- HMAC-SHA256 signature.
+
+The signing key remains local in:
+
+```text
+TRADE_APPROVAL_SIGNING_KEY
+```
+
+and is never included in the notification or committed to Git.
+
+### Single-use lifecycle
+
+```text
+PENDING
+   |
+   +-- invalid signature --> remain PENDING / reject command
+   +-- expired -----------> EXPIRED
+   +-- REJECT ------------> REJECTED
+   +-- APPROVE -----------> APPROVED
+                              |
+                              v
+                     exact trade re-check
+                              |
+                    +---------+---------+
+                    |                   |
+                 changed              exact
+                    |                   |
+                    v                   v
+                REJECTED            CONSUMED
+                                        |
+                                        v
+                               broker.submit_order()
+```
+
+An approval is marked `CONSUMED` **before** broker submission. This is
+intentional: if broker submission fails or the process crashes after
+consumption, the same approval cannot be replayed. A new approval is required.
+
+The durable JSON approval store therefore provides replay protection across
+process restarts, not only within one Python process.
+
+### Least-privilege ntfy credentials
+
+Use separate ntfy identities/tokens rather than one shared credential:
+
+```text
+NTFY_ALERT_PUBLISH_TOKEN
+    WRITE only -> alert topic
+
+Phone ntfy identity
+    READ only  -> alert topic
+
+NTFY_RESPONSE_PUBLISH_TOKEN
+    WRITE only -> response topic
+
+NTFY_RESPONSE_READ_TOKEN
+    READ only  -> response topic
+```
+
+The Approve/Reject action button includes only the **response write token**,
+which should have no read access and no access to the alert topic.
+
+ntfy's HTTP action buttons support custom HTTP headers, so the response action
+can authenticate to the response topic without exposing the response-reader
+credential.
+
+### Signed approval configuration
+
+Generate the local HMAC key on your machine:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Store the output only in local `.env`:
+
+```text
+TRADE_APPROVAL_SIGNING_KEY=<generated secret>
+```
+
+Do not send the signing key to ntfy, GitHub, or ChatGPT.
+
+### Security boundary
+
+This architecture protects against:
+
+- blind response-topic spoofing;
+- command tampering;
+- changing APPROVE to REJECT or vice versa;
+- changing order parameters after approval;
+- expired approvals;
+- replay of an already consumed approval;
+- replay after an execution-engine restart.
+
+It does **not** protect against a fully compromised phone, a compromised
+authenticated alert-topic reader, or compromise of the local signing key.
+Those remain outside the transport-spoofing threat model.
+
+For future live trading, consider a dedicated approval app/WebAuthn or a
+self-hosted ntfy deployment with network-level access controls in addition to
+these application-level protections.

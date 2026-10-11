@@ -7,11 +7,14 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-from trading_execution_engine.approvals.service import ApprovalDecision, ApprovalService
+from trading_execution_engine.approvals.service import (
+    ApprovalDecision,
+    ApprovalService,
+)
 
 
 class NtfyApprovalResponder:
-    """Poll an ntfy response topic and apply APPROVE/REJECT commands."""
+    """Poll an authenticated response topic and validate signed commands."""
 
     def __init__(
         self,
@@ -19,12 +22,17 @@ class NtfyApprovalResponder:
         service: ApprovalService,
         base_url: str,
         response_topic: str,
-        access_token: str | None = None,
+        response_read_token: str,
     ) -> None:
         self._service = service
         self._base_url = base_url.rstrip("/")
         self._response_topic = response_topic.strip()
-        self._access_token = access_token.strip() if access_token else None
+        self._response_read_token = response_read_token.strip()
+
+        if not self._response_topic:
+            raise ValueError("response_topic is required")
+        if not self._response_read_token:
+            raise ValueError("response_read_token is required")
 
     @classmethod
     def from_env(
@@ -32,18 +40,26 @@ class NtfyApprovalResponder:
         *,
         service: ApprovalService,
     ) -> "NtfyApprovalResponder":
+        try:
+            from dotenv import load_dotenv
+        except ImportError as exc:
+            raise RuntimeError(
+                'Push support requires python-dotenv. Run: '
+                'python -m pip install -e ".[push]"'
+            ) from exc
+
+        load_dotenv()
         return cls(
             service=service,
             base_url=os.environ.get("NTFY_BASE_URL", "https://ntfy.sh"),
             response_topic=os.environ["NTFY_RESPONSE_TOPIC"],
-            access_token=os.environ.get("NTFY_ACCESS_TOKEN"),
+            response_read_token=os.environ["NTFY_RESPONSE_READ_TOKEN"],
         )
 
     def _headers(self) -> dict[str, str]:
-        headers: dict[str, str] = {}
-        if self._access_token:
-            headers["Authorization"] = f"Bearer {self._access_token}"
-        return headers
+        return {
+            "Authorization": f"Bearer {self._response_read_token}",
+        }
 
     def poll_since(
         self,
@@ -56,9 +72,7 @@ class NtfyApprovalResponder:
                 "since": since_iso,
             }
         )
-        url = (
-            f"{self._base_url}/{self._response_topic}/json?{query}"
-        )
+        url = f"{self._base_url}/{self._response_topic}/json?{query}"
         request = urllib.request.Request(
             url=url,
             headers=self._headers(),
@@ -75,18 +89,17 @@ class NtfyApprovalResponder:
         for line in lines:
             if not line.strip():
                 continue
-            payload = json.loads(line)
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
             message = payload.get("message")
             if not isinstance(message, str):
                 continue
-            normalized = message.strip()
-            if not (
-                normalized.upper().startswith("APPROVE ")
-                or normalized.upper().startswith("REJECT ")
-            ):
-                continue
+
             decisions.append(
-                self._service.handle_command(normalized)
+                self._service.handle_command(message.strip())
             )
 
         return decisions
