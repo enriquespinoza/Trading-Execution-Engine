@@ -776,3 +776,84 @@ The companion manifest records:
 
 This artifact is the intended boundary between allocation research and order
 construction.
+
+
+## Phase 2H — optimizer target handoff → deterministic OrderRequest
+
+The execution engine now consumes the optimizer's frozen
+`portfolio-target-handoff-v1` artifact directly.
+
+Files:
+
+```text
+src/trading_execution_engine/integrations/
+    optimizer_targets.py
+
+scripts/
+    run_optimizer_target_simulation.py
+
+tests/
+    test_optimizer_target_handoff.py
+```
+
+The adapter fails closed unless all of the following are true:
+
+- `handoff_contract_version == "portfolio-target-handoff-v1"`;
+- `execution_state` is exactly `DRY_RUN` or `PAPER`;
+- `broker_submission_permitted == false`;
+- `immutable == true`;
+- the target CSV SHA-256 matches
+  `execution_safe_targets_sha256` in the optimizer manifest;
+- an optional externally pinned SHA-256 also matches when supplied;
+- allocation, allocation-manifest, scanner-snapshot, and positions hashes are
+  valid SHA-256 values;
+- target CSV columns match the frozen optimizer contract exactly;
+- every row agrees with the manifest's contract, builder, session, hashes,
+  capital, and execution state;
+- target weights, prices, positions, target shares, share deltas, trade sides,
+  target statuses, and accounting invariants are valid;
+- target shares satisfy the frozen whole-share floor rule;
+- manifest row/status/trade counts and aggregate accounting reconcile to the
+  target CSV.
+
+No broker adapter is selected by this handoff parser.
+
+### Deterministic OrderRequest conversion
+
+```text
+share_delta < 0  -> SELL abs(share_delta)
+share_delta = 0  -> no order
+share_delta > 0  -> BUY share_delta
+```
+
+Orders are deterministic:
+
+1. SELL orders first;
+2. BUY orders second;
+3. symbols sorted alphabetically within each side;
+4. MARKET order type;
+5. deterministic order IDs derived from session, target-artifact SHA, symbol,
+   side, and quantity.
+
+This means loading the same immutable optimizer artifact twice produces the
+same ordered `OrderRequest` sequence.
+
+### Simulation command
+
+```bash
+python scripts/run_optimizer_target_simulation.py \
+  --targets /path/to/execution_safe_targets.csv \
+  --manifest /path/to/manifest.json \
+  --expected-sha256 <known-target-artifact-sha256>
+```
+
+The runner always uses `SimulationBroker`, even when the handoff state is
+`PAPER`. The `PAPER` value describes the upstream artifact lifecycle; it
+does not grant broker-submission authority.
+
+The simulation reconstructs the managed sleeve from current positions and
+portfolio capital, submits the deterministic order sequence to
+`SimulationBroker`, and requires the ending positions to match the optimizer
+target shares exactly.
+
+External broker submission remains a separate future boundary.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trading-execution-engine"
-version = "0.8.0"
+version = "0.9.0"
 description = "Deterministic portfolio execution, risk gating, and paper-trading infrastructure."
 requires-python = ">=3.11"
 dependencies = []
