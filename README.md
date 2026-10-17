@@ -857,3 +857,147 @@ portfolio capital, submits the deterministic order sequence to
 target shares exactly.
 
 External broker submission remains a separate future boundary.
+
+
+## Phase 2I — read-only Schwab/sandbox preflight
+
+The next broker-facing boundary remains non-submitting.
+
+Files:
+
+```text
+src/trading_execution_engine/integrations/schwab/
+    account_snapshot.py
+    order_preview.py
+
+tests/
+    test_schwab_account_snapshot.py
+    test_schwab_order_preview.py
+
+scripts/
+    run_schwab_paper_preview.py
+```
+
+This phase validates the same deterministic optimizer `OrderRequest` sequence
+against a read-only Schwab/sandbox account and quote snapshot.
+
+The implementation deliberately exposes no Schwab order-submission method.
+
+### Account snapshot contract
+
+`build_schwab_account_snapshot(...)` normalizes:
+
+- cash balance;
+- optional available funds;
+- optional buying power;
+- whole-share long positions;
+- fresh positive quotes for the complete optimizer target universe;
+- quote timestamps;
+- deterministic snapshot SHA-256.
+
+It rejects:
+
+- missing cash;
+- negative balances;
+- duplicate positions;
+- short positions;
+- fractional positions;
+- missing quotes;
+- nonpositive prices;
+- future quote timestamps;
+- stale quotes;
+- duplicate requested symbols.
+
+Every snapshot hard-codes:
+
+```text
+broker_submission_permitted = false
+```
+
+### Local broker-compatible preview
+
+`build_schwab_order_previews(...)` performs a preflight only.
+
+It requires the live/read-only account positions to agree with the
+`current_position` values frozen into the optimizer handoff before any local
+order specification is created.
+
+For every order it validates:
+
+- symbol is present in the optimizer handoff;
+- side and quantity exactly match `share_delta`;
+- Schwab quote exists;
+- optimizer reference price versus fresh Schwab quote remains within the
+  configured drift threshold;
+- SELL does not exceed the current position;
+- BUY does not exceed cash after prior approved sells/buys.
+
+The local Schwab equity order specification is:
+
+```json
+{
+  "orderType": "MARKET",
+  "session": "NORMAL",
+  "duration": "DAY",
+  "orderStrategyType": "SINGLE",
+  "orderLegCollection": [
+    {
+      "instruction": "BUY or SELL",
+      "quantity": 1,
+      "instrument": {
+        "symbol": "XYZ",
+        "assetType": "EQUITY"
+      }
+    }
+  ]
+}
+```
+
+Generating this dictionary does not call a Schwab endpoint.
+
+Every preview hard-codes:
+
+```text
+broker_submission_permitted = false
+```
+
+### Preflight runner
+
+The CLI accepts read-only Schwab/sandbox JSON captures:
+
+```bash
+python scripts/run_schwab_paper_preview.py \
+  --targets /path/to/execution_safe_targets.csv \
+  --manifest /path/to/manifest.json \
+  --expected-sha256 <optimizer-target-sha256> \
+  --account-json /path/to/account_payload.json \
+  --quotes-json /path/to/quotes_payload.json \
+  --account-hash <schwab-account-hash> \
+  --fetched-at 2026-10-16T20:00:00+00:00 \
+  --output-report reports/validation/schwab_preflight/2026-10-16/preflight.json
+```
+
+The account number itself should not be written into validation artifacts.
+Use the Schwab account hash only as an input to the normalizer; the generated
+preflight report records the normalized snapshot SHA rather than the account
+hash.
+
+A successful run ends with:
+
+```text
+PASS: optimizer orders reconcile to the read-only Schwab snapshot
+and have local broker-compatible previews.
+No Schwab order endpoint was called.
+```
+
+If any order fails account, quote, price-drift, position, or cash checks, the
+runner exits nonzero and no broker action occurs.
+
+### Environment clarification
+
+This repository does not claim direct thinkorswim paperMoney API support.
+The preflight can be exercised against read-only Schwab data or Schwab-provided
+test/sandbox data. A future broker adapter must keep authentication and any
+write capability separate from this preflight layer.
+
+No external order submission is enabled by Phase 2I.

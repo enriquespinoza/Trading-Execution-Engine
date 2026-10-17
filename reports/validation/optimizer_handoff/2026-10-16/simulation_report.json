@@ -1,0 +1,59 @@
+{
+  "validation_contract": "optimizer-handoff-simulation-v1",
+  "session": "2026-10-16",
+  "optimizer_artifact": {
+    "sha256": "35a75ed6eec097c35790263b5dbba8eccff7b0f47514f51aa1b839d5b2f7c0f0",
+    "handoff_contract_version": "portfolio-target-handoff-v1",
+    "target_builder_version": "1.1.0",
+    "execution_state": "DRY_RUN",
+    "portfolio_capital": 100000.0
+  },
+  "execution_engine": {
+    "commit_sha": "90ea921b94c6e745207da3d1b17a3573a36d0324",
+    "broker": "SimulationBroker",
+    "external_broker_submission": false
+  },
+  "result": {
+    "order_count": 15,
+    "filled_count": 15,
+    "rejected_count": 0,
+    "all_fills_successful": true,
+    "starting_cash": 100000.0,
+    "ending_cash": 3348.89,
+    "target_positions_reconciled": true
+  },
+  "orders": [
+    {"symbol": "AMD", "side": "BUY", "quantity": 12},
+    {"symbol": "CIEN", "side": "BUY", "quantity": 14},
+    {"symbol": "DELL", "side": "BUY", "quantity": 13},
+    {"symbol": "HPE", "side": "BUY", "quantity": 181},
+    {"symbol": "ILMN", "side": "BUY", "quantity": 38},
+    {"symbol": "INTC", "side": "BUY", "quantity": 46},
+    {"symbol": "MPC", "side": "BUY", "quantity": 20},
+    {"symbol": "MRNA", "side": "BUY", "quantity": 16},
+    {"symbol": "MRVL", "side": "BUY", "quantity": 8},
+    {"symbol": "PSX", "side": "BUY", "quantity": 34},
+    {"symbol": "STX", "side": "BUY", "quantity": 11},
+    {"symbol": "TER", "side": "BUY", "quantity": 8},
+    {"symbol": "TWLO", "side": "BUY", "quantity": 40},
+    {"symbol": "VLO", "side": "BUY", "quantity": 22},
+    {"symbol": "WDC", "side": "BUY", "quantity": 5}
+  ],
+  "ending_positions": {
+    "AMD": 12.0,
+    "CIEN": 14.0,
+    "DELL": 13.0,
+    "HPE": 181.0,
+    "ILMN": 38.0,
+    "INTC": 46.0,
+    "MPC": 20.0,
+    "MRNA": 16.0,
+    "MRVL": 8.0,
+    "PSX": 34.0,
+    "STX": 11.0,
+    "TER": 8.0,
+    "TWLO": 40.0,
+    "VLO": 22.0,
+    "WDC": 5.0
+  }
+}
