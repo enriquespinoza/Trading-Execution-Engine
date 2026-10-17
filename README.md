@@ -619,3 +619,160 @@ Those remain outside the transport-spoofing threat model.
 For future live trading, consider a dedicated approval app/WebAuthn or a
 self-hosted ntfy deployment with network-level access controls in addition to
 these application-level protections.
+
+
+## Phase 2G — scanner allocation → execution-safe target
+
+`candidate_allocation.csv` is never consumed directly by the order engine.
+
+The execution repository first converts the scanner allocation into a frozen
+handoff artifact:
+
+```text
+candidate_allocation.csv
+        |
+        | SHA-256
+        v
+allocation provenance
+        |
+reference_prices.csv
+current_positions.csv
+portfolio capital
+execution state
+        |
+        v
+execution_target.csv
+        |
+        +--> execution_target.manifest.json
+        |
+        v
+future order construction
+```
+
+The target CSV contract is exactly:
+
+```text
+allocation_sha256
+symbol
+approved_target_weight
+reference_price
+portfolio_capital
+target_dollar_value
+target_shares
+current_position
+share_delta
+execution_state
+```
+
+Only `DRY_RUN` and `PAPER` are valid execution states. There is no
+`LIVE` state in the handoff contract.
+
+### Scanner allocation input
+
+The current scanner allocation contract requires:
+
+```text
+scanner_rank
+symbol
+scanner_score
+annualized_volatility
+target_weight
+```
+
+The execution engine uses only the rank, symbol, and approved target weight.
+The scanner score and volatility remain upstream research fields.
+
+Target weights must sum to 1 within a tolerance of 1e-6.
+
+### Reference-price input
+
+```csv
+symbol,reference_price
+SPY,700.00
+QQQ,620.00
+```
+
+Every allocation symbol and every currently held symbol must have a positive
+reference price.
+
+### Current-position input
+
+```csv
+symbol,current_position
+SPY,20
+QQQ,50
+```
+
+Positions are whole, non-negative shares in this contract.
+
+A currently held symbol that is absent from `candidate_allocation.csv` is
+written to the execution target with:
+
+```text
+approved_target_weight = 0
+target_dollar_value     = 0
+target_shares           = 0
+share_delta             = -current_position
+```
+
+That makes liquidation intent explicit instead of silently dropping the
+position.
+
+### Target-share calculation
+
+```text
+target_dollar_value = portfolio_capital * approved_target_weight
+target_shares       = floor(target_dollar_value / reference_price)
+share_delta         = target_shares - current_position
+```
+
+Whole-share flooring is deterministic and matches the current execution
+policy.
+
+### Build command
+
+Example:
+
+```bash
+python scripts/build_execution_target.py \
+  --allocation /path/to/candidate_allocation.csv \
+  --prices /path/to/reference_prices.csv \
+  --positions /path/to/current_positions.csv \
+  --capital 100000 \
+  --state DRY_RUN \
+  --output reports/execution/2026-10-16/execution_target.csv
+```
+
+For a scanner artifact already validated elsewhere, pin its expected SHA:
+
+```bash
+python scripts/build_execution_target.py \
+  --allocation /path/to/candidate_allocation.csv \
+  --prices /path/to/reference_prices.csv \
+  --positions /path/to/current_positions.csv \
+  --capital 100000 \
+  --state PAPER \
+  --expected-allocation-sha256 <known-sha256> \
+  --output reports/execution/2026-10-16/execution_target.csv
+```
+
+A SHA mismatch fails closed.
+
+### Manifest
+
+The companion manifest records:
+
+- execution-target contract version;
+- generation timestamp;
+- allocation SHA-256;
+- reference-price file SHA-256;
+- current-position file SHA-256;
+- output execution-target SHA-256;
+- portfolio capital;
+- row count;
+- execution state;
+- whole-share policy;
+- `live_execution_allowed: false`.
+
+This artifact is the intended boundary between allocation research and order
+construction.
