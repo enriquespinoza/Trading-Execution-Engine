@@ -1079,3 +1079,91 @@ Schwab trading API: NOT USED
 Broker: SimulationBroker
 External broker submission: false
 ```
+
+
+## Phase 2J — persistent paper state → optimizer rebalance loop
+
+Phase 2J closes the state loop between the persistent paper portfolio and the
+Portfolio Optimization Engine.
+
+Architecture:
+
+```text
+persistent-simulation-account-v1
+  + fresh Schwab market-data capture
+        ↓
+paper-optimizer-position-snapshot-v1
+        ↓
+managed_sleeve_positions.csv
++ manifest.json
+        ↓
+Portfolio Optimization Engine
+        ↓
+portfolio-target-handoff-v1
+        ↓
+Phase 2I paper execution
+        ↓
+next persistent paper-account state
+```
+
+The execution-engine exporter is:
+
+```text
+src/trading_execution_engine/integrations/optimizer_state_export.py
+scripts/export_paper_positions.py
+tests/test_optimizer_state_export.py
+```
+
+The exported CSV uses the optimizer's existing position input columns exactly:
+
+```text
+symbol,current_position,reference_price
+```
+
+The accompanying manifest records:
+
+- `position_snapshot_contract = paper-optimizer-position-snapshot-v1`;
+- persistent paper state version and SHA-256;
+- previous paper-state SHA-256;
+- source optimizer artifact SHA-256;
+- fresh Schwab market snapshot SHA-256;
+- paper cash;
+- marked position value;
+- total portfolio capital;
+- position count;
+- positions CSV SHA-256;
+- `immutable = true`;
+- `broker_submission_permitted = false`.
+
+Portfolio capital is calculated as:
+
+```text
+paper cash
++ Σ(current_position × fresh market reference_price)
+```
+
+The exporter refuses to overwrite an existing snapshot directory.
+
+### Export the current paper portfolio
+
+Capture fresh market data for the current managed sleeve first, then run:
+
+```bash
+python scripts/export_paper_positions.py \
+  --state state/paper_account.json \
+  --market-capture data/schwab/market_capture.json \
+  --output-dir reports/generated/optimizer_positions/YYYY-MM-DD
+```
+
+The resulting files are:
+
+```text
+managed_sleeve_positions.csv
+manifest.json
+```
+
+The optimizer's target builder v1.2.0 can verify this manifest and derive
+portfolio capital directly from it, eliminating manual cash/position copying.
+
+Phase 2J remains fully simulated. It creates optimizer inputs only and exposes
+no external broker submission path.
