@@ -859,145 +859,223 @@ target shares exactly.
 External broker submission remains a separate future boundary.
 
 
-## Phase 2I — read-only Schwab/sandbox preflight
+## Phase 2I — Schwab Market Data → persistent SimulationBroker paper portfolio
 
-The next broker-facing boundary remains non-submitting.
+Phase 2I is a fully simulated execution environment driven by real Schwab
+Market Data quotes.
 
-Files:
+It does **not** use Schwab account endpoints and does **not** call any Schwab
+trading endpoint.
+
+Architecture:
+
+```text
+Scanner
+  ↓
+Optimizer
+  ↓
+portfolio-target-handoff-v1
+  ↓
+Schwab Market Data capture
+  ↓
+schwab-market-snapshot-v1
+  ↓
+persistent local paper account
+  ↓
+SimulationBroker
+  ↓
+fills / cash / positions
+  ↓
+hash-chained next paper-account state
+```
+
+### Components
 
 ```text
 src/trading_execution_engine/integrations/schwab/
-    account_snapshot.py
-    order_preview.py
+    market_data.py
 
-tests/
-    test_schwab_account_snapshot.py
-    test_schwab_order_preview.py
+src/trading_execution_engine/simulation/
+    persistent_account.py
+    paper_portfolio.py
 
 scripts/
-    run_schwab_paper_preview.py
+    run_market_data_paper_simulation.py
+
+tests/
+    test_schwab_market_data.py
+    test_persistent_simulated_account.py
+    test_market_data_paper_simulation.py
 ```
 
-This phase validates the same deterministic optimizer `OrderRequest` sequence
-against a read-only Schwab/sandbox account and quote snapshot.
+The optimizer repository provides the market-data-only capture producer:
 
-The implementation deliberately exposes no Schwab order-submission method.
+```text
+scripts/capture_execution_market_data.py
+```
 
-### Account snapshot contract
+### Market-data contract
 
-`build_schwab_account_snapshot(...)` normalizes:
+The capture producer requests quotes only for the symbols in the optimizer
+execution-target artifact and writes:
 
-- cash balance;
-- optional available funds;
-- optional buying power;
+```text
+capture_contract = schwab-market-data-capture-v1
+captured_at_utc
+symbols
+quotes
+```
+
+The execution engine normalizes that capture into:
+
+```text
+schwab-market-snapshot-v1
+```
+
+The snapshot requires:
+
+- exact symbol-universe agreement with the optimizer target artifact;
+- positive market prices;
+- timezone-aware quote timestamps;
+- quotes no newer than the capture timestamp;
+- quotes within the configured freshness window;
+- deterministic SHA-256 identity.
+
+Execution-reference prices use this priority:
+
+```text
+mark
+lastPrice
+closePrice
+```
+
+### Persistent paper account
+
+Paper cash and positions are owned by:
+
+```text
+state/paper_account.json
+```
+
+The state file is git-ignored and uses:
+
+```text
+persistent-simulation-account-v1
+```
+
+Each state contains:
+
+- state version;
+- UTC update timestamp;
+- cash;
 - whole-share long positions;
-- fresh positive quotes for the complete optimizer target universe;
-- quote timestamps;
-- deterministic snapshot SHA-256.
+- previous-state SHA-256;
+- optimizer artifact SHA-256 that produced the state;
+- Schwab market snapshot SHA-256 used for execution;
+- deterministic order IDs applied during the transition;
+- current state SHA-256.
 
-It rejects:
+State writes are atomic. A tampered state fails SHA verification.
 
-- missing cash;
-- negative balances;
-- duplicate positions;
-- short positions;
-- fractional positions;
-- missing quotes;
-- nonpositive prices;
-- future quote timestamps;
-- stale quotes;
-- duplicate requested symbols.
+The first state must be initialized explicitly. The execution engine never
+silently invents starting cash.
 
-Every snapshot hard-codes:
+### Continuity and replay controls
 
-```text
-broker_submission_permitted = false
-```
+Before any simulated fill, the runner requires the persistent paper positions
+to match the optimizer handoff's frozen `current_position` values exactly.
 
-### Local broker-compatible preview
+It also rejects:
 
-`build_schwab_order_previews(...)` performs a preflight only.
+- reuse of the optimizer artifact already recorded in the current state;
+- market-universe mismatch;
+- stale or future quote timestamps;
+- market/reference-price drift above the configured threshold;
+- fractional orders;
+- insufficient cash;
+- insufficient position for a sale;
+- risk-limit violations.
 
-It requires the live/read-only account positions to agree with the
-`current_position` values frozen into the optimizer handoff before any local
-order specification is created.
+If any order rejects or fails to fill, the next state is not generated.
 
-For every order it validates:
+### Simulated execution
 
-- symbol is present in the optimizer handoff;
-- side and quantity exactly match `share_delta`;
-- Schwab quote exists;
-- optimizer reference price versus fresh Schwab quote remains within the
-  configured drift threshold;
-- SELL does not exceed the current position;
-- BUY does not exceed cash after prior approved sells/buys.
-
-The local Schwab equity order specification is:
-
-```json
-{
-  "orderType": "MARKET",
-  "session": "NORMAL",
-  "duration": "DAY",
-  "orderStrategyType": "SINGLE",
-  "orderLegCollection": [
-    {
-      "instruction": "BUY or SELL",
-      "quantity": 1,
-      "instrument": {
-        "symbol": "XYZ",
-        "assetType": "EQUITY"
-      }
-    }
-  ]
-}
-```
-
-Generating this dictionary does not call a Schwab endpoint.
-
-Every preview hard-codes:
+The execution path uses only:
 
 ```text
-broker_submission_permitted = false
+SimulationBroker
 ```
 
-### Preflight runner
+with configurable:
 
-The CLI accepts read-only Schwab/sandbox JSON captures:
+- slippage in basis points;
+- commission per order;
+- commission per share;
+- maximum order notional.
+
+A successful cycle must finish at the optimizer's target share positions before
+the new state can be persisted.
+
+No external broker submission is permitted.
+
+### Capture current Schwab market data
+
+From the Portfolio Optimization Engine repository:
 
 ```bash
-python scripts/run_schwab_paper_preview.py \
-  --targets /path/to/execution_safe_targets.csv \
-  --manifest /path/to/manifest.json \
-  --expected-sha256 <optimizer-target-sha256> \
-  --account-json /path/to/account_payload.json \
-  --quotes-json /path/to/quotes_payload.json \
-  --account-hash <schwab-account-hash> \
-  --fetched-at 2026-10-16T20:00:00+00:00 \
-  --output-report reports/validation/schwab_preflight/2026-10-16/preflight.json
+python scripts/capture_execution_market_data.py \
+  --targets reports/generated/execution_targets/YYYY-MM-DD/VERSION/execution_safe_targets.csv \
+  --output ../Trading-Execution-Engine/data/schwab/market_capture.json
 ```
 
-The account number itself should not be written into validation artifacts.
-Use the Schwab account hash only as an input to the normalizer; the generated
-preflight report records the normalized snapshot SHA rather than the account
-hash.
+This uses the existing Schwab Market Data Production OAuth boundary. It does
+not request account numbers, balances, positions, user preferences, or trading
+operations.
 
-A successful run ends with:
+The local market capture is excluded by `.gitignore`.
+
+### First paper-portfolio cycle
+
+From the Trading Execution Engine repository:
+
+```bash
+python scripts/run_market_data_paper_simulation.py \
+  --targets ../Thinkorswim-Portfolio-Optimization-Engine/reports/generated/execution_targets/YYYY-MM-DD/VERSION/execution_safe_targets.csv \
+  --manifest ../Thinkorswim-Portfolio-Optimization-Engine/reports/generated/execution_targets/YYYY-MM-DD/VERSION/manifest.json \
+  --expected-sha256 ACTUAL_TARGET_SHA256 \
+  --market-capture data/schwab/market_capture.json \
+  --state state/paper_account.json \
+  --initialize-state \
+  --initial-cash 100000 \
+  --output-report reports/validation/paper_portfolio/YYYY-MM-DD/simulation.json
+```
+
+After initialization, omit both initialization arguments on future cycles:
+
+```bash
+python scripts/run_market_data_paper_simulation.py \
+  --targets /path/to/new/execution_safe_targets.csv \
+  --manifest /path/to/new/manifest.json \
+  --expected-sha256 ACTUAL_TARGET_SHA256 \
+  --market-capture data/schwab/market_capture.json \
+  --state state/paper_account.json \
+  --output-report reports/validation/paper_portfolio/YYYY-MM-DD/simulation.json
+```
+
+The new optimizer handoff must be built using the paper portfolio's current
+positions. This closes the state loop across rebalance cycles.
+
+### Phase boundary
+
+Phase 2I proves execution semantics against real market prices while all cash,
+positions, fills, P&L state, and order effects remain simulated locally.
+
+The Schwab account/trading API is intentionally outside this phase.
 
 ```text
-PASS: optimizer orders reconcile to the read-only Schwab snapshot
-and have local broker-compatible previews.
-No Schwab order endpoint was called.
+Schwab Market Data: USED
+Schwab account API: NOT USED
+Schwab trading API: NOT USED
+Broker: SimulationBroker
+External broker submission: false
 ```
-
-If any order fails account, quote, price-drift, position, or cash checks, the
-runner exits nonzero and no broker action occurs.
-
-### Environment clarification
-
-This repository does not claim direct thinkorswim paperMoney API support.
-The preflight can be exercised against read-only Schwab data or Schwab-provided
-test/sandbox data. A future broker adapter must keep authentication and any
-write capability separate from this preflight layer.
-
-No external order submission is enabled by Phase 2I.
