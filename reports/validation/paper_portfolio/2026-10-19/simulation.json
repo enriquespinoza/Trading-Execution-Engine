@@ -1,0 +1,204 @@
+{
+  "market": {
+    "captured_at_utc": "2026-10-19T17:14:17.879054+00:00",
+    "price_fields": {
+      "AMD": "mark",
+      "BE": "mark",
+      "CIEN": "mark",
+      "COHR": "mark",
+      "DELL": "mark",
+      "HPE": "mark",
+      "ILMN": "mark",
+      "INTC": "mark",
+      "LITE": "mark",
+      "MPC": "mark",
+      "MRNA": "mark",
+      "MRVL": "mark",
+      "MU": "mark",
+      "PSX": "mark",
+      "SNDK": "mark",
+      "STX": "mark",
+      "TER": "mark",
+      "TWLO": "mark",
+      "VLO": "mark",
+      "WDC": "mark"
+    },
+    "snapshot_sha256": "8bd74411995eedb9d9f920551b8ed139a10ae22f067679ba30ca8b2a914a48eb"
+  },
+  "optimizer": {
+    "artifact_sha256": "35a75ed6eec097c35790263b5dbba8eccff7b0f47514f51aa1b839d5b2f7c0f0",
+    "as_of_session": "2026-10-16",
+    "handoff_contract_version": "portfolio-target-handoff-v1",
+    "target_builder_version": "1.1.0"
+  },
+  "orders": [
+    {
+      "fees": 0.0,
+      "fill_price": 542.8,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:AMD:BUY:12",
+      "quantity": 12.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "AMD"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 347.66,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:CIEN:BUY:14",
+      "quantity": 14.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "CIEN"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 460.75,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:DELL:BUY:13",
+      "quantity": 13.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "DELL"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 56.17,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:HPE:BUY:181",
+      "quantity": 181.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "HPE"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 263.6,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:ILMN:BUY:38",
+      "quantity": 38.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "ILMN"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 92.7746,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:INTC:BUY:46",
+      "quantity": 46.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "INTC"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 477.81,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:MPC:BUY:20",
+      "quantity": 20.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "MPC"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 223.195,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:MRNA:BUY:16",
+      "quantity": 16.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "MRNA"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 241.26,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:MRVL:BUY:8",
+      "quantity": 8.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "MRVL"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 292.62,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:PSX:BUY:34",
+      "quantity": 34.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "PSX"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 657.875,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:STX:BUY:11",
+      "quantity": 11.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "STX"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 338.98,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:TER:BUY:8",
+      "quantity": 8.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "TER"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 259.01,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:TWLO:BUY:40",
+      "quantity": 40.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "TWLO"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 440.61,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:VLO:BUY:22",
+      "quantity": 22.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "VLO"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 347.51,
+      "order_id": "optimizer:2026-10-16:35a75ed6eec097c3:WDC:BUY:5",
+      "quantity": 5.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "WDC"
+    }
+  ],
+  "simulation": {
+    "broker": "SimulationBroker",
+    "commission_per_order": 0.0,
+    "commission_per_share": 0.0,
+    "ending_cash": 1431.893399999971,
+    "ending_positions": {
+      "AMD": 12.0,
+      "CIEN": 14.0,
+      "DELL": 13.0,
+      "HPE": 181.0,
+      "ILMN": 38.0,
+      "INTC": 46.0,
+      "MPC": 20.0,
+      "MRNA": 16.0,
+      "MRVL": 8.0,
+      "PSX": 34.0,
+      "STX": 11.0,
+      "TER": 8.0,
+      "TWLO": 40.0,
+      "VLO": 22.0,
+      "WDC": 5.0
+    },
+    "ending_state_sha256": "b452cbbdceefcb7c1ae1905655e566af29cdc5f355c7aa930a76f36ede287e47",
+    "external_broker_submission": false,
+    "filled_count": 15,
+    "max_reference_price_drift_pct": 6.0732702224274675,
+    "rejected_count": 0,
+    "slippage_bps": 0.0,
+    "starting_cash": 100000.0,
+    "starting_state_sha256": "1ddb8269a94b1b2f2df5e8a30bceaaee05b430fc1e2b495e5cb50e85ddea7e94",
+    "state_version": 2
+  },
+  "validation_contract": "market-data-paper-simulation-v1"
+}
