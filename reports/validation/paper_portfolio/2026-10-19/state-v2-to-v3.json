@@ -1,0 +1,187 @@
+{
+  "market": {
+    "captured_at_utc": "2026-10-19T20:49:33.295148+00:00",
+    "price_fields": {
+      "AMD": "mark",
+      "BE": "mark",
+      "CIEN": "mark",
+      "COHR": "mark",
+      "DELL": "mark",
+      "HPE": "mark",
+      "ILMN": "mark",
+      "INTC": "mark",
+      "LITE": "mark",
+      "LRCX": "mark",
+      "MPC": "mark",
+      "MRNA": "mark",
+      "MRVL": "mark",
+      "MU": "mark",
+      "PSX": "mark",
+      "SNDK": "mark",
+      "STX": "mark",
+      "TER": "mark",
+      "TWLO": "mark",
+      "VLO": "mark",
+      "WDC": "mark"
+    },
+    "snapshot_sha256": "20d897e0f5d2a8f25b14e34782b143d38f52fde348ab9437e0c23ed3130acfdd"
+  },
+  "optimizer": {
+    "artifact_sha256": "adff0688cbbcbb80de4dc84c3a975a9f47688ba6bc1c16d0bcfcc0b08fc47434",
+    "as_of_session": "2026-10-19",
+    "handoff_contract_version": "portfolio-target-handoff-v1",
+    "target_builder_version": "1.2.0"
+  },
+  "orders": [
+    {
+      "fees": 0.0,
+      "fill_price": 344.59,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:CIEN:SELL:1",
+      "quantity": 1.0,
+      "side": "SELL",
+      "status": "FILLED",
+      "symbol": "CIEN"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 55.9,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:HPE:SELL:3",
+      "quantity": 3.0,
+      "side": "SELL",
+      "status": "FILLED",
+      "symbol": "HPE"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 262.66,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:ILMN:SELL:1",
+      "quantity": 1.0,
+      "side": "SELL",
+      "status": "FILLED",
+      "symbol": "ILMN"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 237.17,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:MRVL:SELL:2",
+      "quantity": 2.0,
+      "side": "SELL",
+      "status": "FILLED",
+      "symbol": "MRVL"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 290.595,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:PSX:SELL:34",
+      "quantity": 34.0,
+      "side": "SELL",
+      "status": "FILLED",
+      "symbol": "PSX"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 335.95,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:TER:SELL:3",
+      "quantity": 3.0,
+      "side": "SELL",
+      "status": "FILLED",
+      "symbol": "TER"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 258.0,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:TWLO:SELL:2",
+      "quantity": 2.0,
+      "side": "SELL",
+      "status": "FILLED",
+      "symbol": "TWLO"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 352.1,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:WDC:SELL:2",
+      "quantity": 2.0,
+      "side": "SELL",
+      "status": "FILLED",
+      "symbol": "WDC"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 537.86,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:AMD:BUY:1",
+      "quantity": 1.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "AMD"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 456.0,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:DELL:BUY:5",
+      "quantity": 5.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "DELL"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 92.18,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:INTC:BUY:2",
+      "quantity": 2.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "INTC"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 272.5,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:LRCX:BUY:32",
+      "quantity": 32.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "LRCX"
+    },
+    {
+      "fees": 0.0,
+      "fill_price": 227.2,
+      "order_id": "optimizer:2026-10-19:adff0688cbbcbb80:MRNA:BUY:2",
+      "quantity": 2.0,
+      "side": "BUY",
+      "status": "FILLED",
+      "symbol": "MRNA"
+    }
+  ],
+  "simulation": {
+    "broker": "SimulationBroker",
+    "commission_per_order": 0.0,
+    "commission_per_share": 0.0,
+    "ending_cash": 2612.843399999972,
+    "ending_positions": {
+      "AMD": 13.0,
+      "CIEN": 13.0,
+      "DELL": 18.0,
+      "HPE": 178.0,
+      "ILMN": 37.0,
+      "INTC": 48.0,
+      "LRCX": 32.0,
+      "MPC": 20.0,
+      "MRNA": 18.0,
+      "MRVL": 6.0,
+      "STX": 11.0,
+      "TER": 5.0,
+      "TWLO": 38.0,
+      "VLO": 22.0,
+      "WDC": 3.0
+    },
+    "ending_state_sha256": "955dad32a81fa523c6fd27b66bdde7e251a042b4f31c61a887189975d42f3fe0",
+    "external_broker_submission": false,
+    "filled_count": 13,
+    "max_reference_price_drift_pct": 0.3447971001679786,
+    "rejected_count": 0,
+    "slippage_bps": 0.0,
+    "starting_cash": 1431.893399999971,
+    "starting_state_sha256": "b452cbbdceefcb7c1ae1905655e566af29cdc5f355c7aa930a76f36ede287e47",
+    "state_version": 3
+  },
+  "validation_contract": "market-data-paper-simulation-v1"
+}
