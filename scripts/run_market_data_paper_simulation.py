@@ -5,6 +5,9 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
+from trading_execution_engine.execution_policy.policy import (
+    ExecutionOrderPolicy,
+)
 from trading_execution_engine.integrations.optimizer_targets import (
     load_optimizer_target_handoff,
 )
@@ -18,6 +21,11 @@ from trading_execution_engine.simulation.persistent_account import (
     initialize_persistent_account,
     load_persistent_account,
     save_persistent_account,
+)
+from trading_execution_engine.simulation.working_orders import (
+    build_working_order_store,
+    load_working_order_store,
+    save_working_order_store,
 )
 
 
@@ -91,6 +99,32 @@ def main() -> None:
         type=float,
         default=0.0,
     )
+    parser.add_argument(
+        "--use-limit-orders",
+        action="store_true",
+        help=(
+            "Apply deterministic execution-order-policy-v1 LIMIT prices "
+            "instead of the default MARKET orders."
+        ),
+    )
+    parser.add_argument(
+        "--buy-limit-tolerance-bps",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--sell-limit-tolerance-bps",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--working-orders-state",
+        default="state/working_orders.json",
+        help=(
+            "Durable working LIMIT-order store. This state is separate "
+            "from the persistent paper account."
+        ),
+    )
     parser.add_argument("--output-report")
     args = parser.parse_args()
 
@@ -131,6 +165,36 @@ def main() -> None:
         )
         save_persistent_account(state, state_path)
 
+    working_state_path = Path(args.working_orders_state)
+    previous_working_store = None
+    if working_state_path.exists():
+        previous_working_store = load_working_order_store(
+            working_state_path
+        )
+        if (
+            previous_working_store.account_state_sha256
+            != state.state_sha256
+        ):
+            raise SystemExit(
+                "FAIL: working-order state is pinned to a different "
+                "persistent paper-account state."
+            )
+        if (
+            previous_working_store.source_artifact_sha256
+            != handoff.artifact_sha256
+        ):
+            raise SystemExit(
+                "FAIL: unresolved working orders belong to a different "
+                "optimizer artifact. Resolve or remove them before "
+                "starting a new optimizer decision."
+            )
+
+    execution_policy = ExecutionOrderPolicy(
+        use_limit_orders=args.use_limit_orders,
+        buy_limit_tolerance_bps=args.buy_limit_tolerance_bps,
+        sell_limit_tolerance_bps=args.sell_limit_tolerance_bps,
+    )
+
     print("SCHWAB MARKET DATA -> PERSISTENT SIMULATIONBROKER")
     print("=" * 80)
     print(f"Optimizer session:  {handoff.as_of_session}")
@@ -143,6 +207,10 @@ def main() -> None:
     print("Schwab account API: NOT USED")
     print("Schwab trading API: NOT USED")
     print("External submission: false")
+    print(
+        "Execution policy:    "
+        + ("LIMIT" if args.use_limit_orders else "MARKET")
+    )
 
     cycle = run_paper_portfolio_cycle(
         handoff=handoff,
@@ -155,6 +223,7 @@ def main() -> None:
         slippage_bps=args.slippage_bps,
         commission_per_order=args.commission_per_order,
         commission_per_share=args.commission_per_share,
+        execution_policy=execution_policy,
     )
 
     report = cycle.execution_report
@@ -177,16 +246,41 @@ def main() -> None:
             f"{result.execution_reason}"
         )
 
-    save_persistent_account(
-        cycle.ending_state,
-        state_path,
-    )
+    working_store = None
+    if cycle.working_order_ids:
+        working_store = build_working_order_store(
+            account_state_sha256=state.state_sha256,
+            source_artifact_sha256=handoff.artifact_sha256,
+            market_snapshot_sha256=market.snapshot_sha256,
+            results=report.results,
+            previous=previous_working_store,
+        )
+        save_working_order_store(
+            working_store,
+            working_state_path,
+        )
+    elif cycle.state_advanced:
+        save_persistent_account(
+            cycle.ending_state,
+            state_path,
+        )
+        if previous_working_store is not None:
+            working_state_path.unlink()
 
     print()
     print(f"Ending cash:        ${cycle.ending_state.cash:,.2f}")
     print(f"Ending positions:   {cycle.ending_state.positions}")
-    print(f"New state version:  {cycle.ending_state.state_version}")
-    print(f"New state SHA:      {cycle.ending_state.state_sha256}")
+    print(
+        f"State advanced:     "
+        f"{str(cycle.state_advanced).lower()}"
+    )
+    print(f"State version:      {cycle.ending_state.state_version}")
+    print(f"State SHA:          {cycle.ending_state.state_sha256}")
+    if working_store is not None:
+        print(f"Working orders:     {len(working_store.orders)}")
+        print(f"Working version:    {working_store.store_version}")
+        print(f"Working SHA:        {working_store.store_sha256}")
+        print(f"Working state:      {working_state_path}")
     print(
         "Max price drift:   "
         f"{cycle.max_reference_price_drift_pct:.4f}%"
@@ -215,6 +309,14 @@ def main() -> None:
             "ending_positions": dict(report.ending_positions),
             "filled_count": report.filled_count,
             "rejected_count": report.rejected_count,
+            "working_count": report.working_count,
+            "state_advanced": cycle.state_advanced,
+            "working_order_ids": list(cycle.working_order_ids),
+            "working_store_sha256": (
+                working_store.store_sha256
+                if working_store is not None
+                else None
+            ),
             "max_reference_price_drift_pct": (
                 cycle.max_reference_price_drift_pct
             ),
@@ -229,7 +331,10 @@ def main() -> None:
                 "symbol": result.order.symbol,
                 "side": result.order.side.value,
                 "quantity": result.order.quantity,
+                "order_type": result.order.order_type.value,
+                "limit_price": result.order.limit_price,
                 "status": result.status.value,
+                "execution_reason": result.execution_reason,
                 "fill_price": (
                     result.fill.fill_price
                     if result.fill is not None
@@ -250,10 +355,16 @@ def main() -> None:
         print(f"Report:             {args.output_report}")
 
     print()
-    print(
-        "PASS: Schwab market data drove a persistent SimulationBroker "
-        "paper-portfolio cycle."
-    )
+    if cycle.state_advanced:
+        print(
+            "PASS: Schwab market data drove a persistent SimulationBroker "
+            "paper-portfolio cycle."
+        )
+    else:
+        print(
+            "WORKING: one or more valid LIMIT orders remain unfilled. "
+            "Persistent paper-account state was not advanced."
+        )
     print("No Schwab account or trading endpoint was called.")
 
 
