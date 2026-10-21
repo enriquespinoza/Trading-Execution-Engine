@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -55,7 +55,7 @@ def test_working_order_store_round_trip(tmp_path):
         source_artifact_sha256="b" * 64,
         market_snapshot_sha256="c" * 64,
         results=[working_result()],
-        updated_at_utc=NOW,
+        evaluated_at_utc=NOW,
     )
 
     path = tmp_path / "working_orders.json"
@@ -80,7 +80,7 @@ def test_working_order_store_update_is_hash_chained():
         source_artifact_sha256="b" * 64,
         market_snapshot_sha256="c" * 64,
         results=[working_result()],
-        updated_at_utc=NOW,
+        evaluated_at_utc=NOW,
     )
 
     second = build_working_order_store(
@@ -89,7 +89,7 @@ def test_working_order_store_update_is_hash_chained():
         market_snapshot_sha256="d" * 64,
         results=[working_result()],
         previous=first,
-        updated_at_utc=NOW,
+        evaluated_at_utc=NOW,
     )
 
     assert second.store_version == 2
@@ -103,7 +103,7 @@ def test_working_order_store_rejects_different_base_state():
         source_artifact_sha256="b" * 64,
         market_snapshot_sha256="c" * 64,
         results=[working_result()],
-        updated_at_utc=NOW,
+        evaluated_at_utc=NOW,
     )
 
     with pytest.raises(ValueError, match="account state"):
@@ -113,7 +113,7 @@ def test_working_order_store_rejects_different_base_state():
             market_snapshot_sha256="d" * 64,
             results=[working_result()],
             previous=first,
-            updated_at_utc=NOW,
+            evaluated_at_utc=NOW,
         )
 
 
@@ -123,7 +123,7 @@ def test_working_order_store_tamper_fails_hash_check(tmp_path):
         source_artifact_sha256="b" * 64,
         market_snapshot_sha256="c" * 64,
         results=[working_result()],
-        updated_at_utc=NOW,
+        evaluated_at_utc=NOW,
     )
 
     path = tmp_path / "working_orders.json"
@@ -138,3 +138,120 @@ def test_working_order_store_tamper_fails_hash_check(tmp_path):
 
     with pytest.raises(ValueError, match="SHA-256 verification failed"):
         load_working_order_store(path)
+
+
+def test_retry_preserves_original_creation_and_expiry():
+    first = build_working_order_store(
+        account_state_sha256="a" * 64,
+        source_artifact_sha256="b" * 64,
+        market_snapshot_sha256="c" * 64,
+        results=[working_result()],
+        time_in_force=timedelta(minutes=30),
+        evaluated_at_utc=NOW,
+    )
+
+    later = NOW + timedelta(minutes=10)
+    second = build_working_order_store(
+        account_state_sha256="a" * 64,
+        source_artifact_sha256="b" * 64,
+        market_snapshot_sha256="d" * 64,
+        results=[working_result()],
+        previous=first,
+        time_in_force=timedelta(minutes=5),
+        evaluated_at_utc=later,
+    )
+
+    assert second.orders[0].created_at_utc == first.orders[0].created_at_utc
+    assert second.orders[0].expires_at_utc == first.orders[0].expires_at_utc
+    assert second.orders[0].status == OrderStatus.WORKING
+    assert second.orders[0].status_updated_at_utc == later
+
+
+def test_retry_at_expiry_marks_order_expired():
+    first = build_working_order_store(
+        account_state_sha256="a" * 64,
+        source_artifact_sha256="b" * 64,
+        market_snapshot_sha256="c" * 64,
+        results=[working_result()],
+        time_in_force=timedelta(minutes=30),
+        evaluated_at_utc=NOW,
+    )
+
+    second = build_working_order_store(
+        account_state_sha256="a" * 64,
+        source_artifact_sha256="b" * 64,
+        market_snapshot_sha256="d" * 64,
+        results=[working_result()],
+        previous=first,
+        time_in_force=timedelta(minutes=999),
+        evaluated_at_utc=NOW + timedelta(minutes=30),
+    )
+
+    assert second.store_version == 2
+    assert second.orders[0].status == OrderStatus.EXPIRED
+    assert second.orders[0].created_at_utc == first.orders[0].created_at_utc
+    assert second.orders[0].expires_at_utc == first.orders[0].expires_at_utc
+    assert second.is_terminal is True
+
+
+def test_cancel_working_order_store_is_explicit_and_hash_chained():
+    from trading_execution_engine.simulation.working_orders import (
+        cancel_working_order_store,
+    )
+
+    first = build_working_order_store(
+        account_state_sha256="a" * 64,
+        source_artifact_sha256="b" * 64,
+        market_snapshot_sha256="c" * 64,
+        results=[working_result()],
+        evaluated_at_utc=NOW,
+    )
+
+    cancelled_at = NOW + timedelta(minutes=5)
+    cancelled = cancel_working_order_store(
+        first,
+        cancelled_at_utc=cancelled_at,
+    )
+
+    assert cancelled.store_version == 2
+    assert cancelled.previous_store_sha256 == first.store_sha256
+    assert cancelled.orders[0].status == OrderStatus.CANCELLED
+    assert cancelled.orders[0].created_at_utc == first.orders[0].created_at_utc
+    assert cancelled.orders[0].expires_at_utc == first.orders[0].expires_at_utc
+    assert cancelled.orders[0].status_updated_at_utc == cancelled_at
+    assert cancelled.is_terminal is True
+
+
+def test_expire_working_order_store_only_changes_due_orders():
+    from trading_execution_engine.simulation.working_orders import (
+        expire_working_order_store,
+    )
+
+    first = build_working_order_store(
+        account_state_sha256="a" * 64,
+        source_artifact_sha256="b" * 64,
+        market_snapshot_sha256="c" * 64,
+        results=[working_result()],
+        time_in_force=timedelta(minutes=30),
+        evaluated_at_utc=NOW,
+    )
+
+    assert (
+        expire_working_order_store(
+            first,
+            evaluated_at_utc=NOW + timedelta(minutes=29),
+            market_snapshot_sha256="d" * 64,
+        )
+        is None
+    )
+
+    expired = expire_working_order_store(
+        first,
+        evaluated_at_utc=NOW + timedelta(minutes=30),
+        market_snapshot_sha256="d" * 64,
+    )
+
+    assert expired is not None
+    assert expired.orders[0].status == OrderStatus.EXPIRED
+    assert expired.store_version == 2
+    assert expired.previous_store_sha256 == first.store_sha256
