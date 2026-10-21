@@ -5,8 +5,8 @@ import json
 import math
 import os
 import tempfile
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -18,11 +18,23 @@ from trading_execution_engine.models.order import (
 )
 
 
-WORKING_ORDER_STORE_CONTRACT = "working-order-store-v1"
+WORKING_ORDER_STORE_CONTRACT = "working-order-store-v2"
+_TERMINAL_STATUSES = frozenset(
+    {
+        OrderStatus.CANCELLED,
+        OrderStatus.EXPIRED,
+    }
+)
 
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _utc(value: datetime, *, field: str) -> datetime:
+    if value.tzinfo is None:
+        raise ValueError(f"{field} must be timezone-aware")
+    return value.astimezone(timezone.utc)
 
 
 def _require_sha256(value: str, *, field: str) -> str:
@@ -43,6 +55,9 @@ class WorkingOrderRecord:
     quantity: float
     order_type: OrderType
     limit_price: float
+    created_at_utc: datetime
+    expires_at_utc: datetime
+    status_updated_at_utc: datetime
     status: OrderStatus = OrderStatus.WORKING
 
     def __post_init__(self) -> None:
@@ -58,8 +73,32 @@ class WorkingOrderRecord:
             raise ValueError("working-order store only supports LIMIT orders")
         if not math.isfinite(float(self.limit_price)) or self.limit_price <= 0:
             raise ValueError("working order limit_price must be positive")
-        if self.status != OrderStatus.WORKING:
-            raise ValueError("working-order record status must be WORKING")
+
+        created = _utc(self.created_at_utc, field="created_at_utc")
+        expires = _utc(self.expires_at_utc, field="expires_at_utc")
+        updated = _utc(
+            self.status_updated_at_utc,
+            field="status_updated_at_utc",
+        )
+        if expires <= created:
+            raise ValueError("expires_at_utc must be after created_at_utc")
+        if updated < created:
+            raise ValueError(
+                "status_updated_at_utc cannot be before created_at_utc"
+            )
+        if self.status not in {
+            OrderStatus.WORKING,
+            OrderStatus.CANCELLED,
+            OrderStatus.EXPIRED,
+        }:
+            raise ValueError(
+                "working-order record status must be WORKING, "
+                "CANCELLED, or EXPIRED"
+            )
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in _TERMINAL_STATUSES
 
 
 @dataclass(frozen=True)
@@ -76,8 +115,7 @@ class WorkingOrderStore:
     def __post_init__(self) -> None:
         if self.store_version < 1:
             raise ValueError("store_version must be positive")
-        if self.updated_at_utc.tzinfo is None:
-            raise ValueError("updated_at_utc must be timezone-aware")
+        _utc(self.updated_at_utc, field="updated_at_utc")
         _require_sha256(
             self.account_state_sha256,
             field="account_state_sha256",
@@ -103,6 +141,18 @@ class WorkingOrderStore:
         if len(ids) != len(set(ids)):
             raise ValueError("working-order IDs must be unique")
 
+    @property
+    def has_working_orders(self) -> bool:
+        return any(order.status == OrderStatus.WORKING for order in self.orders)
+
+    @property
+    def has_terminal_orders(self) -> bool:
+        return any(order.is_terminal for order in self.orders)
+
+    @property
+    def is_terminal(self) -> bool:
+        return all(order.is_terminal for order in self.orders)
+
     def to_json_dict(self) -> dict[str, Any]:
         payload = _canonical_payload(
             store_version=self.store_version,
@@ -125,6 +175,18 @@ def _order_payload(order: WorkingOrderRecord) -> dict[str, Any]:
         "quantity": float(order.quantity),
         "order_type": order.order_type.value,
         "limit_price": float(order.limit_price),
+        "created_at_utc": _utc(
+            order.created_at_utc,
+            field="created_at_utc",
+        ).isoformat(),
+        "expires_at_utc": _utc(
+            order.expires_at_utc,
+            field="expires_at_utc",
+        ).isoformat(),
+        "status_updated_at_utc": _utc(
+            order.status_updated_at_utc,
+            field="status_updated_at_utc",
+        ).isoformat(),
         "status": order.status.value,
     }
 
@@ -142,8 +204,9 @@ def _canonical_payload(
     return {
         "contract_version": WORKING_ORDER_STORE_CONTRACT,
         "store_version": int(store_version),
-        "updated_at_utc": updated_at_utc.astimezone(
-            timezone.utc
+        "updated_at_utc": _utc(
+            updated_at_utc,
+            field="updated_at_utc",
         ).isoformat(),
         "account_state_sha256": _require_sha256(
             account_state_sha256,
@@ -181,40 +244,15 @@ def _store_sha256(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def build_working_order_store(
+def _build_store(
     *,
     account_state_sha256: str,
     source_artifact_sha256: str,
     market_snapshot_sha256: str,
-    results: Iterable[ExecutionResult],
-    previous: WorkingOrderStore | None = None,
-    updated_at_utc: datetime | None = None,
+    orders: tuple[WorkingOrderRecord, ...],
+    previous: WorkingOrderStore | None,
+    updated_at_utc: datetime,
 ) -> WorkingOrderStore:
-    records: list[WorkingOrderRecord] = []
-
-    for result in results:
-        if result.status != OrderStatus.WORKING:
-            continue
-        order = result.order
-        if order.order_type != OrderType.LIMIT:
-            raise ValueError("WORKING result must contain a LIMIT order")
-        if order.limit_price is None:
-            raise ValueError("WORKING LIMIT order requires limit_price")
-
-        records.append(
-            WorkingOrderRecord(
-                order_id=order.order_id,
-                symbol=order.symbol,
-                side=order.side,
-                quantity=order.quantity,
-                order_type=order.order_type,
-                limit_price=order.limit_price,
-            )
-        )
-
-    if not records:
-        raise ValueError("no WORKING orders supplied")
-
     account_sha = _require_sha256(
         account_state_sha256,
         field="account_state_sha256",
@@ -223,10 +261,13 @@ def build_working_order_store(
         source_artifact_sha256,
         field="source_artifact_sha256",
     )
+    market_sha = _require_sha256(
+        market_snapshot_sha256,
+        field="market_snapshot_sha256",
+    )
 
     version = 1
     previous_sha: str | None = None
-
     if previous is not None:
         if previous.account_state_sha256 != account_sha:
             raise ValueError(
@@ -239,17 +280,15 @@ def build_working_order_store(
         version = previous.store_version + 1
         previous_sha = previous.store_sha256
 
-    updated = (updated_at_utc or _utc_now()).astimezone(timezone.utc)
-    order_tuple = tuple(sorted(records, key=lambda value: value.order_id))
-
+    updated = _utc(updated_at_utc, field="updated_at_utc")
     payload = _canonical_payload(
         store_version=version,
         updated_at_utc=updated,
         account_state_sha256=account_sha,
         source_artifact_sha256=artifact_sha,
-        market_snapshot_sha256=market_snapshot_sha256,
+        market_snapshot_sha256=market_sha,
         previous_store_sha256=previous_sha,
-        orders=order_tuple,
+        orders=orders,
     )
     digest = _store_sha256(payload)
 
@@ -258,13 +297,172 @@ def build_working_order_store(
         updated_at_utc=updated,
         account_state_sha256=account_sha,
         source_artifact_sha256=artifact_sha,
-        market_snapshot_sha256=_require_sha256(
-            market_snapshot_sha256,
-            field="market_snapshot_sha256",
-        ),
+        market_snapshot_sha256=market_sha,
         previous_store_sha256=previous_sha,
-        orders=order_tuple,
+        orders=orders,
         store_sha256=digest,
+    )
+
+
+def build_working_order_store(
+    *,
+    account_state_sha256: str,
+    source_artifact_sha256: str,
+    market_snapshot_sha256: str,
+    results: Iterable[ExecutionResult],
+    previous: WorkingOrderStore | None = None,
+    time_in_force: timedelta = timedelta(days=1),
+    evaluated_at_utc: datetime | None = None,
+) -> WorkingOrderStore:
+    if time_in_force <= timedelta(0):
+        raise ValueError("time_in_force must be positive")
+
+    evaluated = _utc(
+        evaluated_at_utc or _utc_now(),
+        field="evaluated_at_utc",
+    )
+    previous_by_id = (
+        {order.order_id: order for order in previous.orders}
+        if previous is not None
+        else {}
+    )
+
+    records: list[WorkingOrderRecord] = []
+    for result in results:
+        if result.status != OrderStatus.WORKING:
+            continue
+
+        order = result.order
+        if order.order_type != OrderType.LIMIT:
+            raise ValueError("WORKING result must contain a LIMIT order")
+        if order.limit_price is None:
+            raise ValueError("WORKING LIMIT order requires limit_price")
+
+        prior = previous_by_id.get(order.order_id)
+        if prior is not None:
+            if prior.is_terminal:
+                raise ValueError(
+                    "terminal working order cannot return to WORKING"
+                )
+            if (
+                prior.symbol != order.symbol
+                or prior.side != order.side
+                or prior.quantity != order.quantity
+                or prior.limit_price != order.limit_price
+            ):
+                raise ValueError(
+                    "working order changed across retry"
+                )
+            created = prior.created_at_utc
+            expires = prior.expires_at_utc
+        else:
+            created = evaluated
+            expires = evaluated + time_in_force
+
+        status = (
+            OrderStatus.EXPIRED
+            if evaluated >= expires
+            else OrderStatus.WORKING
+        )
+        records.append(
+            WorkingOrderRecord(
+                order_id=order.order_id,
+                symbol=order.symbol,
+                side=order.side,
+                quantity=order.quantity,
+                order_type=order.order_type,
+                limit_price=order.limit_price,
+                created_at_utc=created,
+                expires_at_utc=expires,
+                status_updated_at_utc=evaluated,
+                status=status,
+            )
+        )
+
+    if not records:
+        raise ValueError("no WORKING orders supplied")
+
+    return _build_store(
+        account_state_sha256=account_state_sha256,
+        source_artifact_sha256=source_artifact_sha256,
+        market_snapshot_sha256=market_snapshot_sha256,
+        orders=tuple(sorted(records, key=lambda value: value.order_id)),
+        previous=previous,
+        updated_at_utc=evaluated,
+    )
+
+
+def cancel_working_order_store(
+    store: WorkingOrderStore,
+    *,
+    cancelled_at_utc: datetime | None = None,
+) -> WorkingOrderStore:
+    cancelled = _utc(
+        cancelled_at_utc or _utc_now(),
+        field="cancelled_at_utc",
+    )
+    if store.is_terminal:
+        raise ValueError("working-order store is already terminal")
+
+    orders = tuple(
+        replace(
+            order,
+            status=OrderStatus.CANCELLED,
+            status_updated_at_utc=cancelled,
+        )
+        if order.status == OrderStatus.WORKING
+        else order
+        for order in store.orders
+    )
+    return _build_store(
+        account_state_sha256=store.account_state_sha256,
+        source_artifact_sha256=store.source_artifact_sha256,
+        market_snapshot_sha256=store.market_snapshot_sha256,
+        orders=orders,
+        previous=store,
+        updated_at_utc=cancelled,
+    )
+
+
+def expire_working_order_store(
+    store: WorkingOrderStore,
+    *,
+    evaluated_at_utc: datetime,
+    market_snapshot_sha256: str,
+) -> WorkingOrderStore | None:
+    evaluated = _utc(
+        evaluated_at_utc,
+        field="evaluated_at_utc",
+    )
+
+    changed = False
+    orders: list[WorkingOrderRecord] = []
+    for order in store.orders:
+        if (
+            order.status == OrderStatus.WORKING
+            and evaluated >= order.expires_at_utc
+        ):
+            changed = True
+            orders.append(
+                replace(
+                    order,
+                    status=OrderStatus.EXPIRED,
+                    status_updated_at_utc=evaluated,
+                )
+            )
+        else:
+            orders.append(order)
+
+    if not changed:
+        return None
+
+    return _build_store(
+        account_state_sha256=store.account_state_sha256,
+        source_artifact_sha256=store.source_artifact_sha256,
+        market_snapshot_sha256=market_snapshot_sha256,
+        orders=tuple(orders),
+        previous=store,
+        updated_at_utc=evaluated,
     )
 
 
@@ -334,6 +532,15 @@ def load_working_order_store(
             quantity=float(item["quantity"]),
             order_type=OrderType(str(item["order_type"])),
             limit_price=float(item["limit_price"]),
+            created_at_utc=datetime.fromisoformat(
+                str(item["created_at_utc"]).replace("Z", "+00:00")
+            ),
+            expires_at_utc=datetime.fromisoformat(
+                str(item["expires_at_utc"]).replace("Z", "+00:00")
+            ),
+            status_updated_at_utc=datetime.fromisoformat(
+                str(item["status_updated_at_utc"]).replace("Z", "+00:00")
+            ),
             status=OrderStatus(str(item["status"])),
         )
         for item in raw_orders
