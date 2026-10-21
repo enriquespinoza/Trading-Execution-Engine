@@ -1167,3 +1167,89 @@ portfolio capital directly from it, eliminating manual cash/position copying.
 
 Phase 2J remains fully simulated. It creates optimizer inputs only and exposes
 no external broker submission path.
+
+
+## Phase 2K — execution-order policy and protective stop recommendations
+
+Phase 2K is the next implementation phase after the persistent paper-state loop.
+
+Goals:
+
+- preserve MARKET execution as the default compatibility path;
+- allow deterministic LIMIT recommendations for optimizer BUY and SELL orders;
+- add review-only protective STOP / STOP_LIMIT recommendations for resulting long positions;
+- keep stop logic separate from portfolio selection and allocation;
+- record policy inputs, prices, tolerances, and provenance in immutable artifacts;
+- keep broker submission disabled outside SimulationBroker.
+
+Initial policy contract:
+
+```text
+execution-order-policy-v1
+optimizer_artifact_sha256
+paper_state_sha256
+symbol
+side
+quantity
+reference_price
+recommended_order_type
+limit_price
+stop_price
+stop_limit_price
+buy_limit_tolerance_bps
+sell_limit_tolerance_bps
+stop_distance_pct
+stop_limit_buffer_bps
+review_only
+broker_submission_permitted
+```
+
+Phase 2K must also extend execution-state semantics so a legitimate unfilled LIMIT
+order does not falsely advance the persistent paper account to the optimizer target.
+
+## Phase 2L — options hedge advisor
+
+After Phase 2K, add a review-only portfolio hedge advisor that consumes immutable
+option-chain research artifacts and recommends bounded-risk overlays such as:
+
+- protective puts;
+- put spreads;
+- collars;
+- covered calls when used as an income / exit overlay.
+
+The hedge advisor must provide estimated premium, strike / expiration selection,
+portfolio hedge cost, risk rationale, and provenance. It must not automatically
+submit option orders.
+
+## Phase 2M — thinkorswim review export and paperMoney validation
+
+After Phases 2K and 2L, generate a human-review package for thinkorswim paperMoney:
+
+```text
+equity orders
++ limit recommendations
++ protective stop recommendations
++ optional option hedge suggestions
+        |
+        v
+thinkorswim review export
+        |
+        v
+manual review / staging
+        |
+        v
+paperMoney
+        |
+        v
+fill and state reconciliation vs SimulationBroker
+```
+
+The review package remains non-executable by default:
+
+```text
+review_only = true
+broker_submission_permitted = false
+```
+
+The internal SimulationBroker remains the deterministic reference path throughout
+paperMoney validation.
