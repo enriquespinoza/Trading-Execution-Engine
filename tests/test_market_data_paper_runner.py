@@ -224,7 +224,7 @@ def _write_initial_state(path: Path):
             "BBB": 25,
             "CCC": 5,
         },
-        evaluated_at_utc=CAPTURED,
+        updated_at_utc=CAPTURED,
     )
     save_persistent_account(state, path)
     return state
