@@ -10,7 +10,11 @@ from trading_execution_engine.brokers.simulation import (
 from trading_execution_engine.engine import (
     ExecutionControls,
     ExecutionReport,
+    ExecutionResult,
     ExecutionEngine,
+)
+from trading_execution_engine.execution_policy.policy import (
+    ExecutionOrderPolicy,
 )
 from trading_execution_engine.integrations.optimizer_targets import (
     OptimizerTargetHandoff,
@@ -19,7 +23,8 @@ from trading_execution_engine.integrations.optimizer_targets import (
 from trading_execution_engine.integrations.schwab.market_data import (
     SchwabMarketSnapshot,
 )
-from trading_execution_engine.risk.limits import RiskLimits
+from trading_execution_engine.models.order import OrderStatus, OrderType
+from trading_execution_engine.risk.limits import RiskDecision, RiskLimits
 from trading_execution_engine.simulation.persistent_account import (
     PersistentSimulationAccount,
     advance_persistent_account,
@@ -31,6 +36,8 @@ class PaperPortfolioCycle:
     execution_report: ExecutionReport
     ending_state: PersistentSimulationAccount
     max_reference_price_drift_pct: float
+    state_advanced: bool = True
+    working_order_ids: tuple[str, ...] = ()
     broker_submission_permitted: bool = False
 
     def __post_init__(self) -> None:
@@ -117,6 +124,7 @@ def run_paper_portfolio_cycle(
     slippage_bps: float = 0.0,
     commission_per_order: float = 0.0,
     commission_per_share: float = 0.0,
+    execution_policy: ExecutionOrderPolicy | None = None,
 ) -> PaperPortfolioCycle:
     if handoff.execution_state not in {"DRY_RUN", "PAPER"}:
         raise ValueError(
@@ -133,7 +141,10 @@ def run_paper_portfolio_cycle(
         max_reference_price_drift_pct=max_reference_price_drift_pct,
     )
 
-    orders = optimizer_targets_to_orders(handoff)
+    orders = optimizer_targets_to_orders(
+        handoff,
+        execution_policy=execution_policy,
+    )
     account = state.to_account_state()
     broker = SimulationBroker(
         market.prices,
@@ -143,6 +154,77 @@ def run_paper_portfolio_cycle(
             commission_per_share=commission_per_share,
         ),
     )
+    working_order_ids: list[str] = []
+    preflight_results: list[ExecutionResult] = []
+
+    for order in orders:
+        preview = broker.preview_order(order)
+        if (
+            order.order_type == OrderType.LIMIT
+            and not preview.fillable
+        ):
+            working_order_ids.append(order.order_id)
+            preflight_results.append(
+                ExecutionResult(
+                    order=order,
+                    risk=RiskDecision(True, "approved"),
+                    fill=None,
+                    cash_after=state.cash,
+                    status=OrderStatus.WORKING,
+                    execution_reason=preview.reason,
+                )
+            )
+        else:
+            preflight_results.append(
+                ExecutionResult(
+                    order=order,
+                    risk=RiskDecision(True, "approved"),
+                    fill=None,
+                    cash_after=state.cash,
+                    status=OrderStatus.CREATED,
+                    execution_reason=(
+                        "cycle_waiting_on_working_limit"
+                        if working_order_ids
+                        else "preflight_fillable"
+                    ),
+                )
+            )
+
+    if working_order_ids:
+        # Phase 2K keeps the persistent account atomic. If any LIMIT is not
+        # marketable, no orders in the cycle are executed and the current
+        # state is returned unchanged. A later cycle may retry the same
+        # optimizer artifact against a fresh market snapshot.
+        normalized_results: list[ExecutionResult] = []
+        for result in preflight_results:
+            if result.status == OrderStatus.CREATED:
+                normalized_results.append(
+                    ExecutionResult(
+                        order=result.order,
+                        risk=result.risk,
+                        fill=None,
+                        cash_after=state.cash,
+                        status=OrderStatus.CREATED,
+                        execution_reason="cycle_waiting_on_working_limit",
+                    )
+                )
+            else:
+                normalized_results.append(result)
+
+        report = ExecutionReport(
+            results=tuple(normalized_results),
+            starting_cash=state.cash,
+            ending_cash=state.cash,
+            ending_positions=dict(state.positions),
+        )
+        return PaperPortfolioCycle(
+            execution_report=report,
+            ending_state=state,
+            max_reference_price_drift_pct=max_drift,
+            state_advanced=False,
+            working_order_ids=tuple(working_order_ids),
+        )
+
     engine = ExecutionEngine(
         broker,
         RiskLimits(max_order_notional=max_order_notional),
