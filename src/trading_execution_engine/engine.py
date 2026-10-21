@@ -77,6 +77,13 @@ class ExecutionReport:
             for result in self.results
         )
 
+    @property
+    def working_count(self) -> int:
+        return sum(
+            result.status == OrderStatus.WORKING
+            for result in self.results
+        )
+
 
 class ExecutionEngine:
     def __init__(
