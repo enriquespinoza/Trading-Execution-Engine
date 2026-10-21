@@ -199,7 +199,7 @@ def test_unfilled_limit_order_remains_working_and_does_not_advance_state():
 
     cycle = run_paper_portfolio_cycle(
         handoff=build_handoff(),
-        market=market(aaa=100.0, bbb=50.0),
+        market=market(aaa=98.0, bbb=50.0),
         state=original,
         execution_policy=ExecutionOrderPolicy(
             use_limit_orders=True,
