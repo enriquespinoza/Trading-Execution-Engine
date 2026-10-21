@@ -24,6 +24,8 @@ from trading_execution_engine.simulation.persistent_account import (
 )
 from trading_execution_engine.simulation.working_orders import (
     build_working_order_store,
+    cancel_working_order_store,
+    expire_working_order_store,
     load_working_order_store,
     save_working_order_store,
 )
@@ -125,6 +127,23 @@ def main() -> None:
             "from the persistent paper account."
         ),
     )
+    parser.add_argument(
+        "--working-order-tif-minutes",
+        type=float,
+        default=1440.0,
+        help=(
+            "Deterministic time-in-force for newly created working LIMIT "
+            "orders. Existing working orders retain their original expiry."
+        ),
+    )
+    parser.add_argument(
+        "--cancel-working-orders",
+        action="store_true",
+        help=(
+            "Explicitly cancel the currently persisted working-order set "
+            "without changing the persistent paper account."
+        ),
+    )
     parser.add_argument("--output-report")
     args = parser.parse_args()
 
@@ -188,6 +207,61 @@ def main() -> None:
                 "optimizer artifact. Resolve or remove them before "
                 "starting a new optimizer decision."
             )
+
+        if args.cancel_working_orders:
+            cancelled_store = cancel_working_order_store(
+                previous_working_store,
+                cancelled_at_utc=market.captured_at_utc,
+            )
+            save_working_order_store(
+                cancelled_store,
+                working_state_path,
+            )
+            print(
+                "CANCELLED: persisted working orders were explicitly "
+                "cancelled. Persistent paper-account state was unchanged."
+            )
+            print(f"Working version:    {cancelled_store.store_version}")
+            print(f"Working SHA:        {cancelled_store.store_sha256}")
+            return
+
+        expired_store = expire_working_order_store(
+            previous_working_store,
+            evaluated_at_utc=market.captured_at_utc,
+            market_snapshot_sha256=market.snapshot_sha256,
+        )
+        if expired_store is not None:
+            save_working_order_store(
+                expired_store,
+                working_state_path,
+            )
+            if expired_store.has_terminal_orders:
+                print(
+                    "EXPIRED: one or more persisted LIMIT orders reached "
+                    "their deterministic time-in-force. Persistent "
+                    "paper-account state was unchanged."
+                )
+                print(f"Working version:    {expired_store.store_version}")
+                print(f"Working SHA:        {expired_store.store_sha256}")
+                return
+            previous_working_store = expired_store
+
+        if previous_working_store.has_terminal_orders:
+            raise SystemExit(
+                "FAIL: working-order state contains terminal CANCELLED or "
+                "EXPIRED orders. Resolve that optimizer decision before "
+                "continuing."
+            )
+    elif args.cancel_working_orders:
+        raise SystemExit(
+            "FAIL: --cancel-working-orders requires an existing "
+            "working-order state."
+        )
+
+    if args.working_order_tif_minutes <= 0:
+        raise SystemExit(
+            "FAIL: --working-order-tif-minutes must be positive."
+        )
 
     execution_policy = ExecutionOrderPolicy(
         use_limit_orders=args.use_limit_orders,
@@ -254,6 +328,10 @@ def main() -> None:
             market_snapshot_sha256=market.snapshot_sha256,
             results=report.results,
             previous=previous_working_store,
+            time_in_force=timedelta(
+                minutes=args.working_order_tif_minutes
+            ),
+            evaluated_at_utc=market.captured_at_utc,
         )
         save_working_order_store(
             working_store,
