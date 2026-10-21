@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from trading_execution_engine.execution_policy.policy import (
+    ExecutionOrderPolicy,
+)
 from trading_execution_engine.integrations.optimizer_targets import (
     PORTFOLIO_TARGET_HANDOFF_VERSION,
     TARGET_COLUMNS,
@@ -348,3 +351,49 @@ def test_rejects_non_immutable_manifest(tmp_path):
             target_csv=target_path,
             manifest_json=manifest_path,
         )
+
+
+def test_optimizer_order_policy_can_emit_limits(tmp_path):
+    target_path, manifest_path, artifact_sha = write_bundle(tmp_path)
+
+    handoff = load_optimizer_target_handoff(
+        target_csv=target_path,
+        manifest_json=manifest_path,
+        expected_artifact_sha256=artifact_sha,
+    )
+
+    orders = optimizer_targets_to_orders(
+        handoff,
+        execution_policy=ExecutionOrderPolicy(
+            use_limit_orders=True,
+            buy_limit_tolerance_bps=25,
+            sell_limit_tolerance_bps=50,
+        ),
+    )
+
+    assert [(o.symbol, o.side, o.quantity) for o in orders] == [
+        ("BBB", OrderSide.SELL, 5.0),
+        ("CCC", OrderSide.SELL, 5.0),
+        ("AAA", OrderSide.BUY, 20.0),
+    ]
+
+    assert all(order.order_type == OrderType.LIMIT for order in orders)
+
+    by_symbol = {order.symbol: order for order in orders}
+
+    assert by_symbol["BBB"].limit_price == 199.0
+    assert by_symbol["CCC"].limit_price == 49.75
+    assert by_symbol["AAA"].limit_price == 100.25
+
+    second = optimizer_targets_to_orders(
+        handoff,
+        execution_policy=ExecutionOrderPolicy(
+            use_limit_orders=True,
+            buy_limit_tolerance_bps=25,
+            sell_limit_tolerance_bps=50,
+        ),
+    )
+
+    assert [order.order_id for order in orders] == [
+        order.order_id for order in second
+    ]
