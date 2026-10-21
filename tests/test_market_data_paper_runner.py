@@ -5,7 +5,7 @@ import hashlib
 import importlib.util
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType
 
@@ -185,16 +185,10 @@ def _write_market_capture(
     path: Path,
     *,
     bbb_price: float,
+    captured_at: datetime = CAPTURED,
 ) -> None:
     quote_time = int(
-        datetime(
-            2026,
-            10,
-            21,
-            14,
-            59,
-            tzinfo=timezone.utc,
-        ).timestamp()
+        (captured_at - timedelta(minutes=1)).timestamp()
         * 1000
     )
     prices = {
@@ -204,7 +198,7 @@ def _write_market_capture(
     }
     payload = {
         "capture_contract": "schwab-market-data-capture-v1",
-        "captured_at_utc": CAPTURED.isoformat(),
+        "captured_at_utc": captured_at.isoformat(),
         "symbols": ["AAA", "BBB", "CCC"],
         "quotes": {
             symbol: {
@@ -230,7 +224,7 @@ def _write_initial_state(path: Path):
             "BBB": 25,
             "CCC": 5,
         },
-        updated_at_utc=CAPTURED,
+        evaluated_at_utc=CAPTURED,
     )
     save_persistent_account(state, path)
     return state
@@ -449,7 +443,7 @@ def test_runner_fails_closed_for_working_store_state_or_artifact_mismatch(
             ),
             market_snapshot_sha256="e" * 64,
             results=[result],
-            updated_at_utc=CAPTURED,
+            evaluated_at_utc=CAPTURED,
         )
         save_working_order_store(store, working_path)
 
@@ -473,3 +467,116 @@ def test_runner_fails_closed_for_working_store_state_or_artifact_mismatch(
         unchanged = load_persistent_account(state_path)
         assert unchanged.state_sha256 == state.state_sha256
         assert working_path.exists()
+
+
+def test_runner_explicit_cancel_preserves_paper_account(
+    tmp_path,
+    monkeypatch,
+):
+    case = _setup_runner_case(tmp_path)
+    module = _runner_module()
+    argv = _runner_argv(
+        targets=case["targets"],
+        manifest=case["manifest"],
+        artifact_sha=case["artifact_sha"],
+        capture=case["capture"],
+        state=case["state_path"],
+        working=case["working_path"],
+    )
+
+    _write_market_capture(case["capture"], bbb_price=197.0)
+    _run(monkeypatch, module, argv)
+
+    original_account_bytes = case["state_path"].read_bytes()
+    first = load_working_order_store(case["working_path"])
+    assert first.orders[0].status == OrderStatus.WORKING
+
+    cancel_argv = [*argv, "--cancel-working-orders"]
+    _run(monkeypatch, module, cancel_argv)
+
+    assert case["state_path"].read_bytes() == original_account_bytes
+    cancelled = load_working_order_store(case["working_path"])
+    assert cancelled.store_version == first.store_version + 1
+    assert cancelled.previous_store_sha256 == first.store_sha256
+    assert all(
+        order.status == OrderStatus.CANCELLED
+        for order in cancelled.orders
+    )
+
+
+def test_runner_expiry_preserves_paper_account(
+    tmp_path,
+    monkeypatch,
+):
+    case = _setup_runner_case(tmp_path)
+    module = _runner_module()
+    argv = [
+        *_runner_argv(
+            targets=case["targets"],
+            manifest=case["manifest"],
+            artifact_sha=case["artifact_sha"],
+            capture=case["capture"],
+            state=case["state_path"],
+            working=case["working_path"],
+        ),
+        "--working-order-tif-minutes",
+        "30",
+    ]
+
+    _write_market_capture(
+        case["capture"],
+        bbb_price=197.0,
+        captured_at=CAPTURED,
+    )
+    _run(monkeypatch, module, argv)
+
+    original_account_bytes = case["state_path"].read_bytes()
+    first = load_working_order_store(case["working_path"])
+    assert first.orders[0].status == OrderStatus.WORKING
+    assert first.orders[0].created_at_utc == CAPTURED
+    assert first.orders[0].expires_at_utc == (
+        CAPTURED + timedelta(minutes=30)
+    )
+
+    _write_market_capture(
+        case["capture"],
+        bbb_price=197.0,
+        captured_at=CAPTURED + timedelta(minutes=30),
+    )
+    _run(monkeypatch, module, argv)
+
+    assert case["state_path"].read_bytes() == original_account_bytes
+    expired = load_working_order_store(case["working_path"])
+    assert expired.store_version == first.store_version + 1
+    assert expired.previous_store_sha256 == first.store_sha256
+    assert all(
+        order.status == OrderStatus.EXPIRED
+        for order in expired.orders
+    )
+
+
+def test_runner_terminal_store_blocks_future_execution(
+    tmp_path,
+    monkeypatch,
+):
+    case = _setup_runner_case(tmp_path)
+    module = _runner_module()
+    argv = _runner_argv(
+        targets=case["targets"],
+        manifest=case["manifest"],
+        artifact_sha=case["artifact_sha"],
+        capture=case["capture"],
+        state=case["state_path"],
+        working=case["working_path"],
+    )
+
+    _write_market_capture(case["capture"], bbb_price=197.0)
+    _run(monkeypatch, module, argv)
+    _run(monkeypatch, module, [*argv, "--cancel-working-orders"])
+
+    _write_market_capture(case["capture"], bbb_price=200.0)
+    with pytest.raises(SystemExit, match="terminal CANCELLED or EXPIRED"):
+        _run(monkeypatch, module, argv)
+
+    unchanged = load_persistent_account(case["state_path"])
+    assert unchanged.state_sha256 == case["state"].state_sha256
