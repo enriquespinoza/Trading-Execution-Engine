@@ -21,6 +21,8 @@ class OrderStatus(str, Enum):
     REJECTED = "REJECTED"
     NOT_FILLED = "NOT_FILLED"
     WORKING = "WORKING"
+    CANCELLED = "CANCELLED"
+    EXPIRED = "EXPIRED"
     FILLED = "FILLED"
 
 
