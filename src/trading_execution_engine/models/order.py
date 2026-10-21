@@ -20,6 +20,7 @@ class OrderStatus(str, Enum):
     PENDING_APPROVAL = "PENDING_APPROVAL"
     REJECTED = "REJECTED"
     NOT_FILLED = "NOT_FILLED"
+    WORKING = "WORKING"
     FILLED = "FILLED"
 
 
