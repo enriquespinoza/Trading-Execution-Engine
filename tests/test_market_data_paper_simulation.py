@@ -5,6 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from trading_execution_engine.execution_policy.policy import (
+    ExecutionOrderPolicy,
+)
+from trading_execution_engine.models.order import OrderStatus
 from trading_execution_engine.integrations.optimizer_targets import (
     OptimizerTargetHandoff,
     OptimizerTargetRow,
@@ -188,3 +192,59 @@ def test_insufficient_cash_blocks_state_advance():
             state=state,
             max_reference_price_drift_pct=25.0,
         )
+
+
+def test_unfilled_limit_order_remains_working_and_does_not_advance_state():
+    original = initial_state()
+
+    cycle = run_paper_portfolio_cycle(
+        handoff=build_handoff(),
+        market=market(aaa=100.0, bbb=50.0),
+        state=original,
+        execution_policy=ExecutionOrderPolicy(
+            use_limit_orders=True,
+            buy_limit_tolerance_bps=0,
+            sell_limit_tolerance_bps=100,
+        ),
+    )
+
+    assert cycle.state_advanced is False
+    assert cycle.ending_state is original
+    assert cycle.ending_state.state_version == original.state_version
+    assert cycle.ending_state.state_sha256 == original.state_sha256
+    assert cycle.execution_report.filled_count == 0
+    assert cycle.execution_report.rejected_count == 0
+    assert cycle.execution_report.working_count == 1
+    assert len(cycle.working_order_ids) == 1
+    assert cycle.execution_report.ending_positions == original.positions
+    assert cycle.execution_report.ending_cash == original.cash
+
+    working = [
+        result
+        for result in cycle.execution_report.results
+        if result.status == OrderStatus.WORKING
+    ]
+    assert len(working) == 1
+    assert working[0].order.symbol == "AAA"
+    assert working[0].execution_reason == "limit_not_marketable"
+
+
+def test_fillable_limit_cycle_advances_normally():
+    original = initial_state()
+
+    cycle = run_paper_portfolio_cycle(
+        handoff=build_handoff(),
+        market=market(aaa=100.0, bbb=50.0),
+        state=original,
+        execution_policy=ExecutionOrderPolicy(
+            use_limit_orders=True,
+            buy_limit_tolerance_bps=25,
+            sell_limit_tolerance_bps=25,
+        ),
+    )
+
+    assert cycle.state_advanced is True
+    assert cycle.execution_report.working_count == 0
+    assert cycle.execution_report.filled_count == 2
+    assert cycle.ending_state.state_version == original.state_version + 1
+    assert cycle.ending_state.previous_state_sha256 == original.state_sha256
