@@ -10,6 +10,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from trading_execution_engine.execution_policy.policy import (
+    ExecutionOrderPolicy,
+    apply_execution_order_policy,
+)
 from trading_execution_engine.models.order import (
     OrderRequest,
     OrderSide,
@@ -661,7 +665,19 @@ def load_optimizer_target_handoff(
 
 def optimizer_targets_to_orders(
     handoff: OptimizerTargetHandoff,
+    *,
+    execution_policy: ExecutionOrderPolicy | None = None,
 ) -> tuple[OrderRequest, ...]:
+    """
+    Convert immutable optimizer targets into deterministic OrderRequest rows.
+
+    MARKET remains the compatibility default. When an execution-order policy
+    is supplied, the policy may convert the MARKET intent into a LIMIT order
+    using the optimizer row's frozen reference price.
+
+    Policy application does not grant broker-submission authority.
+    """
+
     candidates = [row for row in handoff.rows if row.share_delta != 0]
     candidates.sort(
         key=lambda row: (
@@ -669,6 +685,8 @@ def optimizer_targets_to_orders(
             row.symbol,
         )
     )
+
+    policy = execution_policy or ExecutionOrderPolicy()
 
     orders: list[OrderRequest] = []
     artifact_tag = handoff.artifact_sha256[:16]
@@ -683,13 +701,20 @@ def optimizer_targets_to_orders(
             f"optimizer:{handoff.as_of_session}:{artifact_tag}:"
             f"{row.symbol}:{side.value}:{quantity}"
         )
+
+        source_order = OrderRequest(
+            symbol=row.symbol,
+            side=side,
+            quantity=quantity,
+            order_type=OrderType.MARKET,
+            order_id=order_id,
+        )
+
         orders.append(
-            OrderRequest(
-                symbol=row.symbol,
-                side=side,
-                quantity=quantity,
-                order_type=OrderType.MARKET,
-                order_id=order_id,
+            apply_execution_order_policy(
+                source_order,
+                reference_price=row.reference_price,
+                policy=policy,
             )
         )
 
