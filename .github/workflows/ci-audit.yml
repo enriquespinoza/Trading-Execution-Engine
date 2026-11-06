@@ -18,20 +18,29 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+      - name: Check out pinned shared audit runner
+        uses: actions/checkout@v4
+        with:
+          repository: enriquespinoza/Systematic-Trading-Research-Platform
+          ref: 0532fac27d99b408641ee7ea63a6fac8f6ad066d
+          path: .audit-tool
+          persist-credentials: false
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
       - name: Install offline test dependencies
-        run: python -m pip install -e ".[dev]"
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pip install "pytest-socket>=0.7,<1"
       - name: Run offline tests and generate evidence
-        run: python scripts/run_ci_audit.py --timeout-seconds 1200
+        run: python .audit-tool/scripts/research_ci_audit.py --repo-root . --output-dir audit-output --engine-id trading-execution --timeout-seconds 1200 --offline
       - name: Upload evidence on success or failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: offline-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          name: trading-execution-audit-${{ github.run_id }}-${{ github.run_attempt }}
           path: audit-output/
           if-no-files-found: error
           retention-days: 90
