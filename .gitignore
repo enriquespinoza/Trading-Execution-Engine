@@ -7,3 +7,6 @@ htmlcov/
 .env
 logs/*.jsonl
 logs/*.log
+
+# Local CI audit output
+audit-output/
