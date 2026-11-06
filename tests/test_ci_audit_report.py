@@ -15,6 +15,7 @@ def test_accepts_valid_junit(tmp_path: Path) -> None:
 @pytest.mark.parametrize("payload", [
     "<bad />",
     "<testsuites />",
+    '<testsuites><testsuite tests="x" failures="0" errors="0" skipped="0" /></testsuites>',
     '<testsuites><testsuite tests="0" failures="0" errors="0" skipped="0" /></testsuites>',
     '<testsuites><testsuite tests="1" failures="2" errors="0" skipped="0" /></testsuites>',
     '<testsuites><testsuite tests="1" failures="0" errors="0" /></testsuites>',
