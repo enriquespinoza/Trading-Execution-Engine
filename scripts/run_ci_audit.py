@@ -96,11 +96,14 @@ def main() -> int:
 
     try:
         counts = parse_junit(junit)
-    except (ET.ParseError, ValueError, KeyError, OSError) as exc:
+    except (ET.ParseError, ValueError, TypeError, KeyError, OSError) as exc:
         counts = {name: 0 for name in ("tests", "failures", "errors", "skipped")}
         problems.append(f"junit_invalid:{type(exc).__name__}")
     if counts["tests"] and counts["tests"] == counts["skipped"]:
         problems.append("all_tests_skipped")
+
+    if os.getenv("GITHUB_ACTIONS") == "true" and not git_sha(root):
+        problems.append("missing_git_commit")
 
     status = "PASS" if exit_code == 0 and not problems and not (counts["failures"] or counts["errors"]) else "FAIL"
     summary = {
